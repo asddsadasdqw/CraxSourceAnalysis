@@ -11,25 +11,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码（可有可无，如果需要用到仓库代码就保留）
       - name: 检出代码
         uses: actions/checkout@v3
 
-      # 第2步：安装依赖
-      - name: 安装依赖 (expect, yamllint等)
+      - name: 安装依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y expect yamllint
 
-      # 第3步：安装 Akash CLI
       - name: 安装 Akash CLI
         run: |
-          # 以 v1.0.0-rc10 版本为例
-          AKASH_VERSION="v1.0.0-rc10"
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/${AKASH_VERSION}/akash_${AKASH_VERSION}_linux_amd64.zip"
-
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
-          curl -sSL "$DOWNLOAD_URL" -o akash.zip
+          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
           if [ ! -s akash.zip ]; then
               echo "下载失败或文件为空。"
               exit 1
@@ -39,10 +31,8 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
 
-          echo "安装完成，版本信息："
           akash version
 
-      # 第4步：验证环境变量
       - name: 验证环境变量
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
@@ -56,112 +46,26 @@ jobs:
             echo "错误：KEYRING_PASSPHRASE 未设置"
             exit 1
           fi
-          echo "环境变量已正确设置"
+          echo "环境变量验证通过"
 
-      # 第5步（示例1）：新创建一个本地 Key
-      # 如果你想导入已有钱包，请用示例2替换
-      - name: 创建一个新的本地key
+      - name: 检查密钥是否存在
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          # Akash CLI 创建新钱包时，会要求两次输入 passphrase。
-          # 用管道的方式输入两次同样的密码：
-          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE") | akash keys add "$AKASH_KEY_NAME" --keyring-backend file
-          echo "创建完毕！"
-
-      # ===== 如果你要导入已有钱包(示例2)，可用以下代码替换上面第5步 =====
-      #
-      # - name: 导入已存在的 Key
-      #   env:
-      #     AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-      #     KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-      #   run: |
-      #     # 将保存在 GitHub Secrets 里的私钥文件内容写入到临时文件
-      #     echo "${{ secrets.AKASH_KEY_FILE_CONTENT }}" > keyfile.txt
-      #
-      #     # 或者，如果只需要一个助记词，也可以:
-      #     # echo "${{ secrets.AKASH_MNEMONIC }}" > mnemonic.txt
-      #
-      #     # 然后通过同样的方法传入两遍 passphrase，如果 CLI 还需要输入助记词，
-      #     # 也可以把助记词用 echo 管道或者 expect 脚本来自动输入。
-      #
-      #     (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE") \
-      #       | akash keys import "$AKASH_KEY_NAME" keyfile.txt --keyring-backend file
-      #
-      #     echo "导入完毕！"
-
-      # 第6步：使用 Expect 脚本，自动输入 Passphrase 来查看钱包地址
-      - name: 获取钱包地址
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-        run: |
-          echo '#!/usr/bin/expect -f
-          set timeout 20
-          log_user 1
-
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
-              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
-              exit 1
-          }
-
-          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
-          expect {
-              "Enter keyring passphrase:" {
-                  send "$::env(KEYRING_PASSPHRASE)\r"
-              }
-              "Error: *" {
-                  puts "错误：$expect_out(buffer)"
-                  exit 1
-              }
-              eof {
-                  puts "错误：spawn 命令未成功执行。(可能是找不到 akash 命令?)"
-                  exit 1
-              }
-              timeout {
-                  puts "错误：spawn 命令超时。"
-                  exit 1
-              }
-          }
-
-          expect {
-              -re {^(akash1[a-z0-9]+)$} {
-                  set address $expect_out(1,string)
-                  send_user "$address\n"
-              }
-              timeout {
-                  puts "错误：未能捕获钱包地址。"
-                  exit 1
-              }
-          }
-
-          expect eof
-          ' > get_address.exp
-
-          chmod +x get_address.exp
-          ADDR=$(./get_address.exp)
-
-          if [ -z "$ADDR" ]; then
-            echo "错误：无法获取钱包地址。"
-            exit 1
+          if akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
+            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
+          else
+            echo "密钥 $AKASH_KEY_NAME 不存在，准备创建。"
           fi
-          echo "您的钱包地址为: $ADDR"
 
-      # (可选) 第7步：查询余额 / 部署 / 其他操作
-      # 如果你已经在某个 Testnet 有资金，可以进行后续操作
-      - name: 查询余额 (可选)
+      - name: 创建密钥
         env:
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          echo "通过 expect 获取地址"
-          # 用同一个脚本也可以再执行一次，或者用 shell 里固定的 passphrase 输入
-          ADDR=$( (echo "$KEYRING_PASSPHRASE") | akash keys show "$AKASH_KEY_NAME" -a --keyring-backend file )
-          echo "地址是: $ADDR"
-
-          echo "查询 $AKASH_CHAIN_ID 的余额..."
-          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
-          echo "查询完成"
+          if ! akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
+            echo "创建新的密钥：$AKASH_KEY_NAME"
+            echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file
+          else
+            echo "密钥 $AKASH_KEY_NAME 已存在，跳过创建步骤。"
+          fi
