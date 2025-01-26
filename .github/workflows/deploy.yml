@@ -44,7 +44,7 @@ jobs:
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
         run: |
-          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
+          yes "" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
           akash tx deployment create akash/deploy.yml \
             --from $AKASH_KEY_NAME \
             --chain-id $AKASH_CHAIN_ID \
