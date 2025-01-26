@@ -50,7 +50,6 @@ jobs:
             exit 1
           fi
 
-          # 创建一个 Expect 脚本用来自动输入助记词和密码
           echo "
           spawn akash keys add \"$AKASH_KEY_NAME\" --recover --keyring-backend file
           expect \"Enter your bip39 mnemonic:\"
@@ -72,13 +71,13 @@ jobs:
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 6: 部署到 Akash（主网）
+      # Step 6: 部署到 Akash（使用主网 chain-id）
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: akashnet-2
-          # 使用 Forbole 提供的公共 RPC。也可以换成别的可用节点
-          AKASH_NODE_URL: https://rpc.akash.forbole.com:443
+          # 使用 tcp 协议 + 26657 端口
+          AKASH_NODE_URL: tcp://rpc.akash.forbole.com:26657
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           # 同样，先检查必要环境变量
@@ -92,7 +91,10 @@ jobs:
               exit 1
           fi
 
-          # 开始部署
+          # 可选：调试 RPC 节点是否返回正常 JSON
+          echo "Testing connectivity to $AKASH_NODE_URL..."
+          curl --fail --max-time 10 "$AKASH_NODE_URL/status" || true
+
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
