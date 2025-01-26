@@ -1,53 +1,14 @@
-name: Deploy to Akash
-
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      # Step 1: 检出代码
-      - name: Check out code
-        uses: actions/checkout@v3
-
-      # Step 2: Docker 登录
-      - name: Docker Login
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      # Step 3: 构建 Docker 镜像
-      - name: Build Docker image
-        run: |
-          docker build -t q18621281648/my-app:latest .
-
-      # Step 4: 推送 Docker 镜像
-      - name: Push Docker image
-        run: |
-          docker push q18621281648/my-app:latest
-
-      # Step 5: 安装 Akash CLI
-      - name: Install Akash CLI
-        run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
-          mkdir -p akash-cli
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-
-      # Step 6: 恢复 Akash 钱包
-      - name: Deploy to Akash
-        env:
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
-          AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
-        run: |
-          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
-          akash tx deployment create akash/deploy.yml \
-            --from $AKASH_KEY_NAME \
-            --chain-id $AKASH_CHAIN_ID \
-            --node $AKASH_NODE_URL \
-            --gas auto --gas-adjustment 1.25 \
-            -y --keyring-backend file
+- name: Deploy to Akash
+  env:
+    AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+    AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+    AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
+    AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
+  run: |
+    echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file --no-passphrase
+    akash tx deployment create akash/deploy.yml \
+      --from $AKASH_KEY_NAME \
+      --chain-id $AKASH_CHAIN_ID \
+      --node $AKASH_NODE_URL \
+      --gas auto --gas-adjustment 1.25 \
+      -y --keyring-backend file
