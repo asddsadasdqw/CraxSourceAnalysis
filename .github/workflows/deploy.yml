@@ -10,25 +10,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: 检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: Docker 登录
       - name: Docker Login
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # Step 3: 构建 Docker 镜像
       - name: Build Docker image
         run: |
           docker build -t q18621281648/my-app:latest .
 
-      # Step 4: 推送 Docker 镜像
       - name: Push Docker image
         run: |
           docker push q18621281648/my-app:latest
 
-      # Step 5: 部署到 Akash
+      - name: Install Akash CLI
+        run: |
+          curl -sSL https://akash.network/install > install-akash.sh
+          chmod +x install-akash.sh
+          ./install-akash.sh
+
       - name: Deploy to Akash
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
