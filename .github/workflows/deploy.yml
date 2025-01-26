@@ -1,156 +1,51 @@
-name: Deploy to Akash Testnet
+name: Create Akash Key
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  create-akash-key:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码
-      - name: Check out code
-        uses: actions/checkout@v3
-
-      # 第2步：安装依赖
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y expect yamllint
-
-      # 第3步：安装 Akash CLI
+      # 安装 Akash CLI
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
-
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          echo "安装完成，版本信息："
           akash version
 
-      # 第4步：验证 Secrets 环境变量
-      - name: Verify environment variables
+      # 创建新密钥并记录信息
+      - name: Create new Akash key
         env:
-          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
-          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
-          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
-          BIP39_SECRET: "${{ secrets.BIP39_SECRET }}"
+          NEW_KEY_NAME: my-new-key
+          KEYRING_PASSPHRASE: "your-secure-password"  # 可以在这里设置安全密码
         run: |
           set -eux
-          if [ -z "$AKASH_KEY_NAME" ]; then
-            echo "错误：AKASH_KEY_NAME 未设置"
-            exit 1
-          fi
-          if [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "错误：KEYRING_PASSPHRASE 未设置"
-            exit 1
-          fi
-          if [ -z "$AKASH_MNEMONIC" ]; then
-            echo "错误：AKASH_MNEMONIC 未设置"
-            exit 1
-          fi
-          echo "环境变量已正确设置"
-          echo "BIP39_SECRET 如果为空，将默认跳过"
+          echo "创建新的密钥: $NEW_KEY_NAME"
 
-      # 第5步：通过助记词导入密钥
-      - name: Import key from mnemonic
-        env:
-          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
-          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
-          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
-          BIP39_SECRET: "${{ secrets.BIP39_SECRET }}"
+          # 动态创建密钥
+          echo "$KEYRING_PASSPHRASE" | akash keys add "$NEW_KEY_NAME" --keyring-backend file > new-key-info.txt
+
+          echo "密钥已创建，保存密钥信息到文件 new-key-info.txt"
+          cat new-key-info.txt
+
+          # 提取地址
+          KEY_ADDRESS=$(grep -oP '(?<=address:\s).*' new-key-info.txt)
+          echo "地址: $KEY_ADDRESS"
+
+          # 提取助记词
+          MNEMONIC=$(grep -oP '(?<=mnemonic:\s).*' new-key-info.txt)
+          echo "助记词: $MNEMONIC"
+
+      # 保存密钥信息（供后续操作使用）
+      - name: Output key information
         run: |
-          set -eux
-
-          # 清理助记词，确保没有多余空格或换行符
-          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
-
-          # 验证助记词的单词数量
-          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
-          if [ "$WORD_COUNT" -ne 24 ]; then
-            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
-            exit 1
-          fi
-
-          # 根据 BIP39_SECRET 是否为空进行处理
-          if [ -z "$BIP39_SECRET" ]; then
-            # 情况1：没有设置 BIP39 passphrase
-            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC"; echo "") \
-              | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-          else
-            # 情况2：设置了 BIP39 passphrase
-            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC"; echo "$BIP39_SECRET") \
-              | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-          fi
-
-          echo "密钥恢复成功！"
-
-      # 第6步：使用 Expect 脚本显示钱包地址
-      - name: Execute Expect script
-        env:
-          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
-          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
-        run: |
-          set -eux
-          echo '#!/usr/bin/expect -f
-          log_user 1
-          set timeout 20
-
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
-              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
-              exit 1
-          }
-
-          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
-          expect {
-              -re {Enter keyring passphrase.*} {
-                  send "$::env(KEYRING_PASSPHRASE)\r"
-              }
-              eof {
-                  puts "错误：spawn 命令未成功执行。(可能找不到 akash？)"
-                  exit 1
-              }
-              timeout {
-                  puts "错误：spawn 命令超时。"
-                  exit 1
-              }
-          }
-
-          expect {
-              -re {^(akash1[a-z0-9]+)$} {
-                  set address $expect_out(1,string)
-                  send_user "$address\n"
-              }
-              timeout {
-                  puts "错误：未能捕获钱包地址。"
-                  exit 1
-              }
-          }
-
-          expect eof
-          ' > get_address.exp
-
-          chmod +x get_address.exp
-          ADDR=$(./get_address.exp)
-
-          if [ -z "$ADDR" ]; then
-            echo "错误：无法获取钱包地址。"
-            exit 1
-          fi
-          echo "您的钱包地址为: $ADDR"
-
-      # (可选) 添加其他操作，如查询余额或执行部署
+          echo "将密钥地址和助记词输出到控制台供手动记录："
+          echo "::set-output name=key_address::$KEY_ADDRESS"
+          echo "::set-output name=mnemonic::$MNEMONIC"
