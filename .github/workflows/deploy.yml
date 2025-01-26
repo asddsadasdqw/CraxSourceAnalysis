@@ -1,4 +1,4 @@
-name: Deploy with New Key
+name: Minimal Working Workflow
 
 on:
   push:
@@ -11,69 +11,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out the code
+      # 第1步：可选，如果你的工作流需要访问仓库代码，就保留
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: Install dependencies
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y expect unzip
-
-      # Step 3: Install Akash CLI (v1.0.0-rc10)
-      - name: Install Akash CLI
-        run: |
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
-          curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
-          akash version
-
-      # Step 4: Create Key
-      - name: Create Key
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-        run: |
-          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Key created: $KEY_NAME, Address: $ADDR"
-
-      # Step 5 (Optional): Query Balance
-      - name: Query Balance
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
-
-      # Step 6: Export Key
-      - name: Export Key
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-        run: |
-          cat <<'EOF' > export_key.exp
-#!/usr/bin/expect -f
-set timeout 20
-spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
-expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }
-expect eof
-EOF
-          chmod +x export_key.exp
-          ./export_key.exp > key.json
-          base64 key.json > key.json.b64
-          echo "Key exported and encoded as key.json.b64"
-
-      # Step 7: Upload Key Artifact
-      - name: Upload Key Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: akash-key-export
-          path: key.json.b64
+      # 第2步：一个简单的 Echo 步骤，证明工作流已成功运行
+      - name: Print a message
+        run: echo "Hello from GitHub Actions! The workflow is working fine."
