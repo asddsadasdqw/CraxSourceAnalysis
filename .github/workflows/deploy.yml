@@ -11,13 +11,13 @@ jobs:
 
     steps:
       #################################################################
-      # （A）检查出代码
+      # 1) 检出代码
       #################################################################
       - name: Check out code
         uses: actions/checkout@v3
 
       #################################################################
-      # （B）可选：调试文件目录
+      # 2) （可选）列出当前目录文件
       #################################################################
       - name: Debug File Path
         run: |
@@ -26,9 +26,10 @@ jobs:
           ls -R
 
       #################################################################
-      # （C）安装 Akash CLI
-      # 文档参考：
-      # https://docs.akash.network/run/cli
+      # 3) 安装 Akash CLI
+      #
+      #   这里下载 v1.0.0-rc10 (Linux AMD64)。如果有更新版本，
+      #   可以修改下面下载链接
       #################################################################
       - name: Install Akash CLI
         run: |
@@ -44,19 +45,13 @@ jobs:
           akash version
 
       #################################################################
-      # （D）恢复 Akash 钱包
+      # 4) 恢复 Akash 钱包 (keys)
       #
-      # - 需要在 GitHub Secrets 中配置:
-      #     AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE
-      #
-      # - 若你还没在本地网络（Testnet / Mainnet）创建过该地址，
-      #   或者还没在 Testnet faucet 中领取到足够币，就会报 "account not found"。
-      #
-      #   在 Testnet 下，你可访问官方水龙头：https://akash-network.test-faucet.link
-      #   输入 “akash1xxxxx” 开头的地址领取测试代币。
-      #
-      # - 文档参考：
-      #   https://docs.akash.network/run/node/keys (官方 Keys 相关)
+      #   需要在仓库 “Settings > Secrets and variables > Actions” 中
+      #   设置下列 Secrets:
+      #     - AKASH_MNEMONIC: 助记词
+      #     - AKASH_KEY_NAME: 本地 keyring 的名字 (如: mykey)
+      #     - KEYRING_PASSPHRASE: 本地 keyring 密码
       #################################################################
       - name: Recover Akash Wallet
         env:
@@ -67,7 +62,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y expect
           
           if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "Error: One or more required environment variables are missing."
+            echo "Error: Missing environment variables (MNEMONIC, KEY_NAME, or PASSPHRASE)."
             exit 1
           fi
 
@@ -85,12 +80,9 @@ jobs:
           rm -f recovery-script.exp
 
       #################################################################
-      # （E）创建证书 (如果没有就创建，有的话就无视报错)
+      # 5) 创建证书 (若已存在同名证书，则忽略错误)
       #
-      # 证书是向链上提交的，若账号上没足够余额，也会失败。
-      #
-      # 文档参考：
-      #   https://docs.akash.network/run/node/certificates
+      #   在 Akash 网络上发起部署需要证书。若账户无余额也会失败。
       #################################################################
       - name: Create Akash Certificate
         env:
@@ -99,7 +91,6 @@ jobs:
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          # 若已存在同名证书，不要报错退出
           echo "$KEYRING_PASSPHRASE" | akash tx cert create client \
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
@@ -109,10 +100,11 @@ jobs:
             -y || true
 
       #################################################################
-      # （F）可选：调试 Keys
+      # 6) （可选）调试：列出当前 Keys，便于查看地址
       #
-      #   可以查看“akash keys list”输出的地址
-      #   然后拿这个地址去 Testnet Faucet 领币
+      #    你可以在日志里找到 "address" 行，然后把它拿去
+      #    Testnet Faucet: https://akash-network.test-faucet.link/
+      #    领取测试代币
       #################################################################
       - name: Debug Keys
         run: |
@@ -120,16 +112,31 @@ jobs:
           akash keys list
 
       #################################################################
-      # （G）部署到 Testnet
+      # 7) （新增）在部署之前，先检查余额
       #
-      # - SDL 文件需要命名为 deploy.yml 并放在仓库根目录
-      # - account not found 解决方案：
-      #    1. 确保你的地址真的在 sandbox-01 上
-      #    2. 并且 faucet 中领取过0.5AKT以上测试代币
+      #    如果这里显示 "balances: []" 或 "account not found"，
+      #    表示还没给这个地址领水龙头代币/地址未初始化。
       #
-      # - 官方 CLI 文档：
-      #   https://docs.akash.network/running-an-akash-node/node-setup
-      #   https://docs.akash.network/run/cli
+      #    确保进入 Testnet Faucet -> 填写这里调试输出的地址
+      #    领到 >= 0.5 AKT 测试币
+      #################################################################
+      - name: Check Balance
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          echo "Checking account balance on $AKASH_CHAIN_ID..."
+          ADDR=$(akash keys show "$AKASH_KEY_NAME" -a --keyring-backend file)
+          echo "Your wallet address is: $ADDR"
+          echo "Querying bank balances..."
+          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+
+      #################################################################
+      # 8) 部署到 Testnet
+      #
+      #    需要在仓库根目录有 deploy.yml 文件 (SDL)
       #################################################################
       - name: Deploy to Testnet
         env:
@@ -138,22 +145,23 @@ jobs:
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          # 先检查必要环境变量
+          # 1) 检查环境
           if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
             echo "Error: Missing env variables for deployment"
             exit 1
           fi
           
           if [ ! -f deploy.yml ]; then
-              echo "Error: deploy.yml not found in repo root!"
+              echo "Error: deploy.yml not found!"
               exit 1
           fi
 
+          # 2) 先测试一下 RPC
           echo "Testing connectivity to $AKASH_NODE_URL..."
           curl --fail --max-time 10 "$AKASH_NODE_URL/status"
 
+          # 3) 发起部署交易
           echo "Sending deployment transaction..."
-          # 如果地址在链上没记录，就会报 account not found
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
