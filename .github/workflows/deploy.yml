@@ -37,7 +37,7 @@ jobs:
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
           echo "Akash CLI configured to use remote node."
 
-      # 4. 创建新的 Akash 钱包
+      # 4. 创建新的 Akash 钱包（示例口令 qq112233）
       - name: Create New Akash Wallet
         run: |
           echo "Creating a new Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
@@ -52,57 +52,57 @@ jobs:
           akash keys list --keyring-backend file
           echo "Wallet Address: $AKASH_ADDRESS"
 
-      # 6. 生成 SDL 文件
+      # 6. 生成 SDL 文件 (deployment.yaml)
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
-          version: "2.0"
+version: "2.0"
 
-          services:
-            web:
-              image: "${{ secrets.DOCKER_USERNAME }}/my-app:latest"
-              expose:
-                - port: 80
-                  as: 80
-                  to:
-                    - global: true
+services:
+  web:
+    image: "${{ secrets.DOCKER_USERNAME }}/my-app:latest"
+    expose:
+      - port: 80
+        as: 80
+        to:
+          - global: true
 
-          profiles:
-            compute:
-              basic:
-                resources:
-                  cpu:
-                    units: 0.5
-                  memory:
-                    size: 512Mi
-                  storage:
-                    size: 1Gi
-            placement:
-              basic:
-                attributes: {}
-                signedBy:
-                  anyOf: []
-                pricing:
-                  web:
-                    denom: uakt
-                    amount: 1000
+profiles:
+  compute:
+    basic:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 512Mi
+        storage:
+          size: 1Gi
+  placement:
+    basic:
+      attributes: {}
+      signedBy:
+        anyOf: []
+      pricing:
+        web:
+          denom: uakt
+          amount: 1000
 
-          deployment:
-            web:
-              profile: basic
-              count: 1
-          EOF
+deployment:
+  web:
+    profile: basic
+    count: 1
+EOF
 
       # 7. 创建部署
       - name: Create Deployment
         run: |
           echo "Creating deployment on Akash..."
           echo "qq112233" | akash tx deployment create deployment.yaml \
-          --from "${{ secrets.AKASH_KEY_NAME }}" \
-          --deposit "5000000uakt" \
-          --yes \
-          --keyring-backend file \
-          --sign-mode direct
+            --from "${{ secrets.AKASH_KEY_NAME }}" \
+            --deposit "5000000uakt" \
+            --yes \
+            --keyring-backend file \
+            --sign-mode direct
           echo "Deployment created!"
 
       # 8. 验证部署状态
