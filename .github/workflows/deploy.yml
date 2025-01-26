@@ -42,9 +42,9 @@ jobs:
           akash version
 
       #################################################################
-      # 4) 恢复钱包 (file keyring) 并自动输入助记词&密码
+      # 4) 恢复钱包 (file keyring) 并自动输入助记词 & 密码
       #
-      #   需要你在 GitHub Secrets 配置：
+      #   需要在 "Settings > Secrets > Actions" 中配置：
       #   - AKASH_MNEMONIC
       #   - AKASH_KEY_NAME
       #   - KEYRING_PASSPHRASE
@@ -78,7 +78,7 @@ jobs:
       #################################################################
       # 5) 创建证书 (若已存在同名证书，则忽略错误)
       #
-      #   在 Akash 网络上发起部署需要证书。若账户无余额也会失败。
+      #   在 Akash 网络上发起部署需要证书
       #################################################################
       - name: Create Akash Certificate
         env:
@@ -96,10 +96,9 @@ jobs:
             -y || true
 
       #################################################################
-      # 6) （可选）列出当前 Keys（不一定能显示地址，
-      #     因为 file backend 也会 prompt passphrase）
+      # 6) （可选）列出所有 key (名称)
       #
-      #     但还是可以看看 key name
+      #   file keyring 下，会提示输入密码，但先看看能否列出
       #################################################################
       - name: Debug Key Names
         run: |
@@ -107,10 +106,10 @@ jobs:
           akash keys list --keyring-backend file
 
       #################################################################
-      # 7) 在部署之前，先检查余额
+      # 7) 在部署之前，先检查余额 (用 expect 获取地址)
       #
-      #    因为 file keyring模式下 "akash keys show <NAME>" 也会
-      #    交互式要密码，所以这里用 Expect 获取地址并保存到 $ADDR。
+      #   - 避免 "invalid name or address" "too many failed attempts"
+      #   - 抓取地址后再 query bank balances
       #################################################################
       - name: Check Balance
         env:
@@ -122,25 +121,16 @@ jobs:
           sudo apt-get update && sudo apt-get install -y expect
 
           # 1) 用 expect 获取地址
-          cat <<'EOF' > get_address.exp
+          cat <<EOF > get_address.exp
 #!/usr/bin/expect -f
-# 不显示 expect 命令的提示
 log_user 0
-
-# 启动 "akash keys show <KEYNAME> -a --keyring-backend file"
 spawn akash keys show "$env(AKASH_KEY_NAME)" -a --keyring-backend file
-
-# 等待提示输入 passphrase
 expect "Enter keyring passphrase:"
-# 输入 passphrase
 send "$env(KEYRING_PASSPHRASE)\r"
-
-# 期待下行里会打印地址
-# 这里用正则捕获 "akash1[0-9a-z]+"
+# 匹配整行: akash1 后面跟字母数字
 expect {
   -re {^(akash1[a-z0-9]+)$} {
      set address $expect_out(1,string)
-     # 把地址输出到 stdout
      send_user "$address\n"
   }
 }
@@ -148,7 +138,6 @@ expect eof
 EOF
 
           chmod +x get_address.exp
-          # 执行并把捕获到的地址保存到 ADDR
           ADDR=$(./get_address.exp)
           echo "Your wallet address is: $ADDR"
 
@@ -157,9 +146,9 @@ EOF
           akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
       #################################################################
-      # 8) 部署到 Testnet（发送 tx deployment create）
+      # 8) 部署到 Testnet (发送 tx deployment create)
       #
-      #   需要在仓库根目录放一个 deploy.yml (SDL)
+      #   - 需在仓库根目录有 deploy.yml (SDL)
       #################################################################
       - name: Deploy to Testnet
         env:
@@ -178,7 +167,7 @@ EOF
           echo "Testing connectivity to $AKASH_NODE_URL..."
           curl --fail --max-time 10 "$AKASH_NODE_URL/status"
 
-          # 3) 发起部署交易
+          # 3) 发起部署
           echo "Sending deployment transaction..."
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
