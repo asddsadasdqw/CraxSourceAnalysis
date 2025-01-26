@@ -1,162 +1,62 @@
-name: Akash Key Demo
+name: Deploy to Akash Testnet
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
-  create-and-export:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 安装依赖
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect unzip
+          sudo apt-get install -y expect yamllint
 
-      - name: 安装 Akash CLI
+      - name: Install Akash CLI
         run: |
-          set -eux
-          AKASH_VERSION="v1.0.0-rc10"
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/${AKASH_VERSION}/akash_${AKASH_VERSION}_linux_amd64.zip"
-
-          echo "下载 Akash CLI: $DOWNLOAD_URL"
+          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-
+          mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          echo "安装完成："
           akash version
 
-      - name: 创建新的 Key
+      - name: Import key from mnemonic
         env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "123456"   # 演示用；正式请存到Secrets
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
-          # akash keys add 要交互两次口令，用管道输入：
-          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") \
-            | akash keys add "$KEY_NAME" --keyring-backend file
 
-          # 获取钱包地址（同样要输入一次口令解锁）
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "创建成功！Key名称: $KEY_NAME, 地址: $ADDR"
+          # 清理助记词
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
 
-      - name: 导出 Key (加密 JSON)
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "123456"
-        run: |
-          set -eux
-          # 导出成 JSON，需要输入一次口令
-          (echo "$KEY_PASSPHRASE") | akash keys export "$KEY_NAME" key-export.json --keyring-backend file
-          
-          # base64 编码，避免换行等字符在后续步骤出问题
-          base64 key-export.json > key-export.json.b64
-
-      - name: 上传 Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: akash-key-export
-          path: key-export.json.b64
-
-  import-and-use:
-    runs-on: ubuntu-latest
-    needs: create-and-export
-    steps:
-      - name: 下载 Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: akash-key-export
-          path: ./temp
-
-      - name: 安装依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y expect unzip
-
-      - name: 安装 Akash CLI
-        run: |
-          set -eux
-          AKASH_VERSION="v1.0.0-rc10"
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/${AKASH_VERSION}/akash_${AKASH_VERSION}_linux_amd64.zip"
-
-          echo "下载 Akash CLI: $DOWNLOAD_URL"
-          curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
-
-          akash version
-
-      - name: 导入 Key
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "123456"
-        run: |
-          set -eux
-          # 解码 Artifact
-          base64 -d ./temp/key-export.json.b64 > key-export.json
-
-          # 导入时同样要交互两次口令
-          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") \
-            | akash keys import "$KEY_NAME" key-export.json --keyring-backend file
-
-          echo "已成功导入 Key: $KEY_NAME"
-
-      - name: 使用 Expect 解锁并查看地址
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "123456"
-        run: |
-          set -eux
-          echo '#!/usr/bin/expect -f
-          set timeout 20
-          log_user 1
-
-          spawn akash keys show "$::env(KEY_NAME)" -a --keyring-backend file
-          expect {
-              -re {Enter keyring passphrase.*} {
-                  send "$::env(KEY_PASSPHRASE)\r"
-              }
-              eof {
-                  puts "错误：spawn 命令未成功执行。"
-                  exit 1
-              }
-              timeout {
-                  puts "错误：spawn 命令超时。"
-                  exit 1
-              }
-          }
-
-          expect {
-              -re {^(akash1[a-z0-9]+)$} {
-                  set address $expect_out(1,string)
-                  send_user "$address\n"
-              }
-              timeout {
-                  puts "错误：未能捕获地址。"
-                  exit 1
-              }
-          }
-
-          expect eof
-          ' > get_address.exp
-
-          chmod +x get_address.exp
-          ADDR=$(./get_address.exp)
-
-          if [ -z "$ADDR" ]; then
-            echo "错误：无法获取钱包地址！"
+          # 验证助记词的单词数量
+          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+          if [ "$WORD_COUNT" -ne 24 ]; then
+            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
             exit 1
           fi
-          echo "导入完成！该 Key 地址为: $ADDR"
+
+          # 调试输入值
+          echo "密钥名称: $AKASH_KEY_NAME"
+          echo "清理后的助记词: $CLEANED_MNEMONIC"
+          echo "密码长度: ${#KEYRING_PASSPHRASE}"
+
+          # 恢复密钥
+          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
+            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
+              echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
+              exit 1
+            }
+
+          echo "密钥恢复成功！"
