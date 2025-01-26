@@ -27,21 +27,27 @@ jobs:
           sudo chmod +x /usr/local/bin/akash
           echo "Akash CLI installed successfully."
 
-      # 3. 验证 Akash CLI 是否安装成功
-      - name: Verify Akash CLI Installation
+      # 3. 清理钱包缓存
+      - name: Clear Akash Wallet Cache
         run: |
-          akash version
-          which akash
+          rm -rf ~/.akash/keyring-file
 
-      # 4. 创建 Akash 钱包
-      - name: Create Akash Wallet
+      # 4. 创建新的 Akash 钱包
+      - name: Create New Akash Wallet
         run: |
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --keyring-backend file
-          ADDR=$(echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file)
+          echo "Creating a new Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
+          (echo "qq112233"; echo "qq112233") | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --keyring-backend file
+          ADDR=$( (echo "qq112233") | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file )
           echo "Wallet Address: $ADDR"
           echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
 
-      # 5. 生成 SDL 文件
+      # 5. 验证钱包是否正确创建
+      - name: Verify Akash Wallet
+        run: |
+          akash keys list --keyring-backend file
+          echo "Wallet Address: $AKASH_ADDRESS"
+
+      # 6. 生成 SDL 文件
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
@@ -82,11 +88,11 @@ jobs:
               count: 1
           EOF
 
-      # 6. 创建部署
+      # 7. 创建部署
       - name: Create Deployment
         run: |
           echo "Creating deployment on Akash..."
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx deployment create deployment.yaml \
+          echo "qq112233" | akash tx deployment create deployment.yaml \
           --from "${{ secrets.AKASH_KEY_NAME }}" \
           --deposit "5000000uakt" \
           --yes \
@@ -94,7 +100,7 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 7. 验证部署状态
+      # 8. 验证部署状态
       - name: Verify Deployment
         run: |
           ADDR=$AKASH_ADDRESS
