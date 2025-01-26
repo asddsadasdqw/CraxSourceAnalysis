@@ -1,4 +1,4 @@
-name: Akash Workflow
+name: Deploy to Akash
 
 on:
   push:
@@ -11,106 +11,115 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out the code
-      - name: Check out code
-        uses: actions/checkout@v3
-
-      # Step 2: Install Akash CLI (v1.0.0-rc10)
-      - name: Install Akash CLI
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip
+          sudo apt-get install -y expect unzip
+
+      - name: Install Akash CLI
+        run: |
+          set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
+          echo "Downloading from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
+          if [ ! -s akash.zip ]; then
+            echo "Download failed or file is empty."
+            exit 1
+          fi
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-          echo "Akash CLI installed successfully:"
           akash version
 
-      # Step 3: Register a new Akash Wallet
-      - name: Register Akash Wallet
+      - name: Create a new key
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
         run: |
-          echo "Creating a new Akash wallet..."
+          set -eux
+          # 注册新钱包: 输入两遍口令
           (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Wallet registered successfully!"
-          echo "Wallet Name: $KEY_NAME"
-          echo "Wallet Address: $ADDR"
 
-      # Step 4: Query Wallet Balance
-      - name: Query Wallet Balance
+          # 查看地址(输入一次口令)
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "New wallet created: $KEY_NAME, address: $ADDR"
+
+      - name: Check out repo (Git关联)
+        uses: actions/checkout@v3
+
+      - name: Query balance (demo)
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
+          set -eux
           ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Querying balance for $ADDR on chain $AKASH_CHAIN_ID..."
+          echo "Querying balance for $ADDR on $AKASH_CHAIN_ID..."
           akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
-      # Step 5: Export Wallet Key
-      - name: Export Wallet Key
+      - name: Deploy to Akash (demo, needs tokens!)
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          set -eux
+          # 如果你有 deployment.yaml 放在仓库根目录，这里直接用
+          # 否则改成自己的路径
+          SDL_FILE="deployment.yaml"
+
+          if [ ! -f "$SDL_FILE" ]; then
+            echo "No deployment.yaml found in repo root! Please add or update path."
+            exit 1
+          fi
+
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "Attempting to deploy $SDL_FILE from address: $ADDR"
+          
+          # 这里做一个“简单部署”示例
+          # akash deploy create --from ...
+          #   但 v1.0.0-rc10 可能使用 "akash tx deployment create" 的方式
+          #   具体命令可根据 CLI 文档做微调
+          
+          (echo "$KEY_PASSPHRASE") | akash tx deployment create "$SDL_FILE" \
+            --from "$KEY_NAME" \
+            --keyring-backend file \
+            --node "$AKASH_NODE_URL" \
+            --chain-id "$AKASH_CHAIN_ID" \
+            --fees 5000uakt -y
+          
+          echo "Deployment transaction submitted."
+          echo "Note: If you don't have enough test tokens, this step may fail."
+
+      - name: Export key for Jarvis
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
         run: |
-          echo "Exporting wallet key to encrypted file..."
-          cat <<EOF > export_key.exp
+          set -eux
+          # 用 Expect 脚本来自动输入口令
+          cat <<'EOF' > export_key.exp
 #!/usr/bin/expect -f
 set timeout 20
+log_user 1
 spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
-expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\r" }
+expect {
+  -re {Enter keyring passphrase.*} {
+    send "$::env(KEY_PASSPHRASE)\r"
+    exp_continue
+  }
+  eof {}
+  timeout {
+    puts "Error: export command timed out."
+    exit 1
+  }
+}
 expect eof
 EOF
           chmod +x export_key.exp
           ./export_key.exp > key.json
           base64 key.json > key.json.b64
-          echo "Key exported and encoded as key.json.b64"
-
-      # Step 6: Upload Key Artifact
-      - name: Upload Wallet Key Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: akash-wallet-key
-          path: key.json.b64
-
-      # Step 7: Deploy Akash Application
-      - name: Deploy Akash Application
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          echo "Deploying Akash application..."
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Using wallet address: $ADDR"
-          # 示例部署（替换为实际的 SDL 文件路径和部署命令）
-          SDL_FILE="deployment.yaml"
-          akash tx deployment create "$SDL_FILE" --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
-          echo "Application deployment submitted!"
-
-      # Step 8: Associate Git Repository with Akash Deployment
-      - name: Associate Git Repository
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          echo "Associating current Git repository with Akash deployment..."
-          REPO_URL=$(git config --get remote.origin.url)
-          COMMIT_HASH=$(git rev-parse HEAD)
-          echo "Repository URL: $REPO_URL"
-          echo "Commit Hash: $COMMIT_HASH"
-          # 示例：记录 Git 信息到 Akash 网络或其他持久化存储
-          echo "Git Repository URL: $REPO_URL" > git_info.txt
-          echo "Commit Hash: $COMMIT_HASH" >> git_info.txt
-          akash tx deployment update git-info git_info.txt --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
-          echo "Git repository successfully associated with the deployment!"
+          echo "key.json.b64 created. Provide this plus password 'qq112233' to import in another environment."
