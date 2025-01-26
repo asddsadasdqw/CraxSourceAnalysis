@@ -84,7 +84,7 @@ spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
 
 expect {
     -re {Enter keyring passphrase.*} {
-        send "$::env(KEY_PASSPHRASE)\r"
+        send "$::env(KEY_PASSPHRASE)\\r"
         exp_continue
     }
     eof {}
