@@ -27,10 +27,15 @@ jobs:
           sudo chmod +x /usr/local/bin/akash
           echo "Akash CLI installed successfully."
 
-      # 3. 清理钱包缓存
-      - name: Clear Akash Wallet Cache
+      # 3. 配置 Akash CLI 使用远程节点
+      - name: Configure Akash CLI
         run: |
-          rm -rf ~/.akash/keyring-file
+          mkdir -p ~/.akash
+          echo "node = 'https://rpc.akashnet.net:443'" > ~/.akash/config.toml
+          echo "chain-id = 'akashnet-2'" >> ~/.akash/config.toml
+          echo "broadcast-mode = 'block'" >> ~/.akash/config.toml
+          echo "keyring-backend = 'file'" >> ~/.akash/config.toml
+          echo "Akash CLI configured to use remote node."
 
       # 4. 创建新的 Akash 钱包
       - name: Create New Akash Wallet
