@@ -14,28 +14,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: Debug File Path
-      - name: Debug File Path
-        run: |
-          echo "Current working directory: $(pwd)"
-          echo "Listing files in current directory:"
-          ls -R
-
-      # Step 3: Log in to Docker
-      - name: Docker Login
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      # Step 4: Build Docker image
-      - name: Build Docker image
-        run: |
-          docker build -t q18621281648/my-app:latest .
-
-      # Step 5: Push Docker image to the registry
-      - name: Push Docker image
-        run: |
-          docker push q18621281648/my-app:latest
-
-      # Step 6: Install Akash CLI
+      # Step 2: Install Akash CLI
       - name: Install Akash CLI
         run: |
           curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
@@ -44,7 +23,7 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
           akash version
 
-      # Step 7: Recover Akash Wallet
+      # Step 3: Recover Akash Wallet
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
@@ -64,24 +43,21 @@ jobs:
           " > recovery-script.exp
           expect recovery-script.exp
 
-      # Step 8: Debug Keys
+      # Step 4: Debug Keys
       - name: Debug Keys
         run: |
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 9: Deploy to Akash
+      # Step 5: Deploy to Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          if [ ! -f deploy.yml ]; then
-              echo "Error: deploy.yml not found!"
-              exit 1
-          fi
-          akash tx deployment create deploy.yml \
+          echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
