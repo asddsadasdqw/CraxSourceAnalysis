@@ -16,26 +16,19 @@ jobs:
 
       - name: 安装 Akash CLI
         run: |
-          # 下载 Akash CLI
           curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
           if [ ! -s akash.zip ]; then
               echo "下载失败或文件为空。"
               exit 1
           fi
-
-          # 解压并安装
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          # 验证是否安装成功
           if ! command -v akash &> /dev/null; then
               echo "错误：Akash CLI 未正确安装。"
               exit 1
           fi
-
-          # 打印版本信息
           akash version
 
       - name: 验证环境变量
@@ -58,16 +51,40 @@ jobs:
           # 写入 expect 脚本
           echo '#!/usr/bin/expect -f
           log_user 1
-          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
-          expect "Enter keyring passphrase:"
-          send "$::env(KEYRING_PASSPHRASE)\r"
-          expect {
-            -re {^(akash1[a-z0-9]+)$} {
-              set address $expect_out(1,string)
-              send_user "$address\n"
-            }
+
+          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
+              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
+              exit 1
           }
-          expect eof' > get_address.exp
+
+          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
+          expect {
+              "Enter keyring passphrase:" {
+                  send "$::env(KEYRING_PASSPHRASE)\r"
+              }
+              eof {
+                  puts "错误：spawn 命令未成功执行。"
+                  exit 1
+              }
+              timeout {
+                  puts "错误：spawn 命令超时。"
+                  exit 1
+              }
+          }
+
+          expect {
+              -re {^(akash1[a-z0-9]+)$} {
+                  set address $expect_out(1,string)
+                  send_user "$address\n"
+              }
+              timeout {
+                  puts "错误：未能捕获钱包地址。"
+                  exit 1
+              }
+          }
+
+          expect eof
+          ' > get_address.exp
 
           chmod +x get_address.exp
           ADDR=$(./get_address.exp)
