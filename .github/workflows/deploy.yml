@@ -1,4 +1,4 @@
-name: Akash Workflow with Monitoring and Automation
+name: Deploy to Akash
 
 on:
   push:
@@ -9,19 +9,46 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      # 以下环境变量可在GitHub仓库 Settings > Secrets and variables > Actions 中配置，
+      # 避免明文泄露。此处仅作示例，请根据实际情况设置。
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      DOCKER_IMAGE_NAME: "your-org/your-image"  # 改成你实际的镜像名，如 "myname/mywebapp"
+      AKASH_KEY_NAME: "botkey"                  # akash 钱包名称
+      AKASH_KEY_PASSPHRASE: ${{ secrets.AKASH_KEY_PASSPHRASE }}
+      # 如果在测试网上还需要 faucet 领取代币，可以在这里设定 TESTNET_FAUCET_URL 等
+      # 也可以设定 AKASH_NODE, AKASH_CHAIN_ID 等信息
+      AKASH_NODE: "https://raw.raw.network:26657"       # 主网或测试网节点
+      AKASH_CHAIN_ID: "akashnet-2"                      # 主网: akashnet-2；测试网可改
+      DEPLOYMENT_NAME: "my-jarvis-bot"                  # Akash上部署时的名字(自定义标识)
 
     steps:
-      # Step 1: Check out the code
+      # 1) Check out the code
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: Install Akash CLI and dependencies
+      # 2) Log in to Docker registry (Docker Hub / GHCR / etc.)
+      - name: Log in to Docker Registry
+        run: |
+          echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+
+      # 3) Build Docker Image
+      - name: Build Docker Image
+        run: |
+          docker build -t ${DOCKER_IMAGE_NAME}:latest .
+
+      # 4) Push Docker Image
+      - name: Push Docker Image
+        run: |
+          docker push ${DOCKER_IMAGE_NAME}:latest
+
+      # 5) Install Akash CLI
       - name: Install Akash CLI
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect unzip curl jq
+          sudo apt-get install -y expect unzip jq
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
@@ -29,76 +56,156 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
-      # Step 3: Register a new Akash Wallet
-      - name: Register Akash Wallet
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
+      # 6) 初始化默认配置（可根据需要手工设置NODE、CHAIN_ID等）
+      - name: Akash CLI config
         run: |
-          echo "Creating a new Akash wallet..."
-          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Wallet registered successfully!"
-          echo "Wallet Name: $KEY_NAME"
+          mkdir -p ~/.akash
+          cat <<EOF > ~/.akash/config.toml
+          node = "${AKASH_NODE}"
+          chain-id = "${AKASH_CHAIN_ID}"
+          broadcast-mode = "block"
+          keyring-backend = "file"
+          EOF
+          echo "Akash config generated."
+
+      # 7) 创建/导入 Akash 钱包 (这里示例：如果你想每次都新建一个钱包)
+      - name: Create new Akash wallet
+        run: |
+          echo "Creating a new Akash wallet: ${AKASH_KEY_NAME}"
+          (echo "${AKASH_KEY_PASSPHRASE}"; echo "${AKASH_KEY_PASSPHRASE}") | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
+          ADDR=$( (echo "${AKASH_KEY_PASSPHRASE}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
           echo "Wallet Address: $ADDR"
+          echo "::set-output name=AKASH_ADDRESS::$ADDR"
 
-      # Step 4: Export Wallet Key
-      - name: Export Wallet Key
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
+      # 如果是测试网，还需要从 faucet 领取代币 (示例逻辑，可能需调整URL和参数)
+      # - name: Request test tokens from faucet
+      #   if: always()
+      #   run: |
+      #     ADDR=$( (echo "${AKASH_KEY_PASSPHRASE}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
+      #     echo "Requesting faucet for address: $ADDR"
+      #     curl -X POST -d '{"address":"'$ADDR'"}' ${TESTNET_FAUCET_URL}
+      #     # 等待到账，可以sleep几秒或轮询账户余额
+      #     sleep 15
+      #     akash query bank balances $ADDR
+
+      # 8) 编写 SDL 文件 (使用你的 Docker 镜像)
+      - name: Generate SDL
+        id: generatesdl
         run: |
-          echo "Exporting wallet key to encrypted file..."
-          echo '#!/usr/bin/expect -f' > export_key.exp
-          echo 'set timeout 20' >> export_key.exp
-          echo 'spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file' >> export_key.exp
-          echo 'expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }' >> export_key.exp
-          echo 'expect eof' >> export_key.exp
-          chmod +x export_key.exp
-          ./export_key.exp > key.json
-          base64 key.json > key.json.b64
-          echo "Key exported and encoded as key.json.b64"
+          cat <<EOF > deployment.yaml
+          version: "2.0"
 
-      # Step 5: Upload Wallet Key Artifact
-      - name: Upload Wallet Key Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: akash-wallet-key
-          path: key.json.b64
+          services:
+            web:
+              image: "${DOCKER_IMAGE_NAME}:latest"
+              expose:
+                - port: 80
+                  as: 80
+                  to:
+                    - global: true
 
-      # Step 6: Monitor Services and Resources
-      - name: Health Check - Web Service
+          profiles:
+            compute:
+              basic:
+                resources:
+                  cpu:
+                    units: 0.5
+                  memory:
+                    size: 512Mi
+                  storage:
+                    size: 1Gi
+            placement:
+              basic:
+                attributes: {}
+                signedBy:
+                  anyOf:
+                    - "akash1xxxxxx..."    # 也可以留空表示不限制
+                pricing:
+                  web:
+                    denom: uakt
+                    amount: 1000  # bid 每区块费用，根据需求调整
+
+          deployment:
+            web:
+              profile: basic
+              count: 1
+          EOF
+          cat deployment.yaml
+
+      # 9) 创建部署(tx create deployment)
+      - name: Create Deployment
+        id: createdeployment
         run: |
-          echo "Checking Web Service health..."
-          STATUS_CODE=$(curl -o /dev/null -s -w "%{http_code}" http://your-web-service-domain)
-          if [ "$STATUS_CODE" -eq 200 ]; then
-            echo "Web Service is healthy. Status Code: $STATUS_CODE"
-          else
-            echo "Web Service is unhealthy! Status Code: $STATUS_CODE"
-            exit 1
-          fi
+          set -e
+          echo "Creating deployment on Akash..."
+          # 这里默认押金为 5 AKT (5000000uakt)，可以根据需要修改
+          (echo "${AKASH_KEY_PASSPHRASE}") | akash tx deployment create deployment.yaml --from "${AKASH_KEY_NAME}" --deposit "5000000uakt" --yes --keyring-backend file
+          echo "Deployment created!"
 
-      - name: Monitor System Resources
+      # 10) 查询 deployment sequence / dseq
+      - name: Get Deployment Sequence
+        id: getdseq
         run: |
-          echo "Monitoring system resources..."
-          echo "CPU Usage:" && top -bn1 | grep "Cpu(s)"
-          echo "Memory Usage:" && free -m
-          echo "Disk Usage:" && df -h
+          ADDR=$( (echo "${AKASH_KEY_PASSPHRASE}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
+          DSEQ_JSON=$(akash query deployment list --owner "$ADDR" --state active -o json)
+          # 取最近一个 dseq
+          DSEQ=$(echo "$DSEQ_JSON" | jq '.deployments[-1].deployment.deployment_id.dseq')
+          echo "Found dseq: $DSEQ"
+          echo "dseq=$DSEQ" >> $GITHUB_OUTPUT
 
-      # Step 7: Deploy Akash Application
-      - name: Deploy Akash Application
-        env:
-          AKASH_ACCOUNT_ADDRESS: ${{ secrets.AKASH_ACCOUNT_ADDRESS }}
-          AKASH_KEYRING_BACKEND: file
+      # 11) 等待 bid → lease (简化逻辑，若要确保有供应商投标，可循环等待并检查)
+      - name: Wait for provider bid & create lease
+        id: waitforbid
         run: |
-          echo "Starting Akash deployment..."
-          akash tx deployment create deploy.yaml --from $AKASH_ACCOUNT_ADDRESS --keyring-backend $AKASH_KEYRING_BACKEND --gas auto --chain-id akashnet-2
-          echo "Deployment submitted to Akash network."
+          set -e
+          DSEQ=${{ steps.getdseq.outputs.dseq }}
+          echo "Waiting for any provider to bid on dseq=$DSEQ..."
 
-      # Step 8: Verify Deployment Status
-      - name: Verify Deployment Status
-        env:
-          AKASH_ACCOUNT_ADDRESS: ${{ secrets.AKASH_ACCOUNT_ADDRESS }}
+          # 循环等待 bid
+          MAX_WAIT=60
+          INTERVAL=5
+          waited=0
+          while [ $waited -lt $MAX_WAIT ]; do
+            BIDS=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq '.bids | length')
+            if [ "$BIDS" -gt 0 ]; then
+              echo "Bid found. Bids count: $BIDS"
+              break
+            fi
+            echo "No bids yet, sleep $INTERVAL sec..."
+            sleep $INTERVAL
+            waited=$((waited + INTERVAL))
+          done
+
+          # 接受第一个 bid
+          PROVIDER=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
+          echo "Selected provider: $PROVIDER"
+
+          # 创建 lease
+          (echo "${AKASH_KEY_PASSPHRASE}") | akash tx market lease create --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
+          echo "Lease created!"
+
+          echo "provider=$PROVIDER" >> $GITHUB_OUTPUT
+
+      # 12) 发送 manifest(必须先有 lease 才能 send-manifest)
+      - name: Send manifest
         run: |
-          echo "Verifying deployment status..."
-          akash query deployment list --owner $AKASH_ACCOUNT_ADDRESS --output json | jq .
+          set -e
+          DSEQ=${{ steps.getdseq.outputs.dseq }}
+          PROVIDER=${{ steps.waitforbid.outputs.provider }}
+          (echo "${AKASH_KEY_PASSPHRASE}") | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
+          echo "Manifest sent!"
+
+      # 13) 输出最终访问地址 (需要等容器启动，可简单等待或轮询)
+      - name: Show Service URI
+        run: |
+          DSEQ=${{ steps.getdseq.outputs.dseq }}
+          PROVIDER=${{ steps.waitforbid.outputs.provider }}
+          echo "Waiting 30s for container to start..."
+          sleep 30
+          SERVICE_INFO=$(akash provider lease-status --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --service web)
+          echo "Lease service info:"
+          echo "$SERVICE_INFO"
+          # 解析出访问URI
+          URI=$(echo "$SERVICE_INFO" | jq -r '.uris[0]')
+          echo "Service URI = $URI"
+          echo "你可以通过 http://$URI 访问部署的服务"
