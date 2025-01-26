@@ -37,27 +37,25 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
           akash version
 
-      # Step 6: Debug AKASH_MNEMONIC (Optional for troubleshooting)
-      - name: Debug AKASH_MNEMONIC
+      # Step 6: Debug secrets (Optional for troubleshooting)
+      - name: Debug Secrets
         if: always()
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          echo "Testing if AKASH_MNEMONIC is set:"
-          if [ -z "$AKASH_MNEMONIC" ]; then
-            echo "AKASH_MNEMONIC is empty!"
-            exit 1
-          else
-            echo "AKASH_MNEMONIC is set."
-          fi
+          echo "Testing secrets:"
+          echo "AKASH_MNEMONIC length: ${#AKASH_MNEMONIC}"
+          echo "KEYRING_PASSPHRASE length: ${#KEYRING_PASSPHRASE}"
 
       # Step 7: Recover Akash Wallet
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
+          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file <<< "$KEYRING_PASSPHRASE"
 
       # Step 8: Deploy to Akash Network
       - name: Deploy to Akash
