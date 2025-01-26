@@ -1,4 +1,4 @@
-name: Deploy to Akash
+name: Deploy to Akash GPU Testnet
 
 on:
   push:
@@ -10,18 +10,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      #---------------------------------------
       # Step 1: 检出代码
+      #---------------------------------------
       - name: Check out code
         uses: actions/checkout@v3
 
+      #---------------------------------------
       # Step 2: 调试文件路径（可选）
+      #---------------------------------------
       - name: Debug File Path
         run: |
           echo "Current working directory: $(pwd)"
           echo "Listing files in the current directory:"
           ls -R
 
+      #---------------------------------------
       # Step 3: 安装 Akash CLI
+      #   这里示例下载 v1.0.0-rc10 (Linux AMD64)
+      #---------------------------------------
       - name: Install Akash CLI
         run: |
           curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
@@ -35,7 +42,11 @@ jobs:
           sudo chmod +x /usr/local/bin/akash
           akash version
 
-      # Step 4: 恢复 Akash 钱包
+      #---------------------------------------
+      # Step 4: 恢复钱包
+      #   - 从 GitHub Secrets 中读取：
+      #       AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE
+      #---------------------------------------
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
@@ -44,8 +55,9 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y expect
           
+          # 检查环境变量是否存在
           if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "Error: One or more required environment variables (AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE) are missing."
+            echo "Error: One or more required environment variables are missing."
             exit 1
           fi
 
@@ -62,24 +74,58 @@ jobs:
           expect recovery-script.exp
           rm -f recovery-script.exp
 
-      # Step 5: 调试密钥
+      #---------------------------------------
+      # Step 5: 创建本地证书 (解决 .pem 文件找不到的问题)
+      #   - 若已创建过，可以酌情改为 "更新" 或跳过
+      #   - 这里简单粗暴每次都创建一次
+      #---------------------------------------
+      - name: Create Akash Certificate
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          # GPU Testnet 参数
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: https://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
+            echo "Missing environment variables for cert creation"
+            exit 1
+          fi
+
+          echo "$KEYRING_PASSPHRASE" | akash tx cert create client \
+            --chain-id "$AKASH_CHAIN_ID" \
+            --node "$AKASH_NODE_URL" \
+            --from "$AKASH_KEY_NAME" \
+            --keyring-backend file \
+            --sign-mode direct \
+            -y || true
+
+          # 有时证书已存在会报错，这里用 `|| true` 忽略重复错误
+
+      #---------------------------------------
+      # Step 6: 调试钱包 / 密钥信息（可选）
+      #---------------------------------------
       - name: Debug Keys
         run: |
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 6: 部署到 Akash（主网 chain-id）
-      - name: Deploy to Akash
+      #---------------------------------------
+      # Step 7: 部署到 GPU Testnet
+      #   - 需要你在仓库里准备好 deploy.yml (SDL)
+      #   - 注意：如果 SDL 里包含 GPU 资源需求，
+      #     要确保 Testnet Provider 的确支持 GPU
+      #---------------------------------------
+      - name: Deploy to GPU Testnet
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          AKASH_CHAIN_ID: akashnet-2
-          # 改成带端口的 HTTPS
-          AKASH_NODE_URL: https://akash-rpc.polkachu.com:443
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: https://rpc.sandbox-01.aksh.pw:26657
         run: |
-          # 1) 检查必要环境变量
-          if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "Error: One or more required environment variables (AKASH_KEY_NAME, AKASH_CHAIN_ID, KEYRING_PASSPHRASE) are missing."
+          # 检查必要环境变量
+          if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
+            echo "Error: Missing env variables for deployment"
             exit 1
           fi
 
@@ -88,14 +134,12 @@ jobs:
               exit 1
           fi
 
-          # 2) 测试 RPC 是否可返回 JSON
-          echo "Testing connectivity to $AKASH_NODE_URL..."
-          curl --fail --max-time 10 "$AKASH_NODE_URL/status"
-
-          # 3) 用 Akash CLI 提交部署交易
+          # 直接执行部署
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
             --gas auto --gas-adjustment 1.25 \
             -y --keyring-backend file --sign-mode direct
+
+          echo "Deployment transaction sent."
