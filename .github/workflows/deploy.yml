@@ -31,9 +31,9 @@ jobs:
       # Step 5: 安装 Akash CLI
       - name: Install Akash CLI
         run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/latest/download/akash_linux_amd64.tar.gz -o akash.tar.gz
+          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
           mkdir -p akash-cli
-          tar -xvf akash.tar.gz -C akash-cli --strip-components=1
+          unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
 
       # Step 6: 部署到 Akash
