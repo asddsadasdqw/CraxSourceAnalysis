@@ -54,7 +54,7 @@ jobs:
           echo "Querying balance for $ADDR on chain $AKASH_CHAIN_ID..."
           akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
-      # Step 5: Export Wallet Key (Encrypted Storage)
+      # Step 5: Export Wallet Key
       - name: Export Wallet Key
         env:
           KEY_NAME: newkey
@@ -65,7 +65,7 @@ jobs:
 #!/usr/bin/expect -f
 set timeout 20
 spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
-expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\r" }
+expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }
 expect eof
 EOF
           chmod +x export_key.exp
