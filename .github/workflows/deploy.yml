@@ -45,16 +45,16 @@ jobs:
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           sudo apt-get update && sudo apt-get install -y expect
-          echo "
-          spawn akash keys add \"$AKASH_KEY_NAME\" --recover --keyring-backend file
-          expect \"Enter your bip39 mnemonic:\"
-          send \"$AKASH_MNEMONIC\\r\"
-          expect \"Enter keyring passphrase:\"
-          send \"$KEYRING_PASSPHRASE\\r\"
-          expect \"Re-enter keyring passphrase:\"
-          send \"$KEYRING_PASSPHRASE\\r\"
-          expect eof
-          " > recovery-script.exp
+          cat <<EOF > recovery-script.exp
+spawn akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
+expect "Enter your bip39 mnemonic:"
+send "$AKASH_MNEMONIC\r"
+expect "Enter keyring passphrase:"
+send "$KEYRING_PASSPHRASE\r"
+expect "Re-enter keyring passphrase:"
+send "$KEYRING_PASSPHRASE\r"
+expect eof
+EOF
           expect recovery-script.exp
 
       # Step 7: Verify Wallet Recovery
@@ -62,18 +62,19 @@ jobs:
         run: |
           akash keys list
 
-      # Step 8: Deploy to Akash Network
+      # Step 8: Deploy to Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
+        working-directory: akash
         run: |
-          if [ ! -f akash/deploy.yml ]; then
-            echo "Error: akash/deploy.yml not found!"
-            exit 1
+          if [ ! -f deploy.yml ]; then
+              echo "Error: deploy.yml not found!"
+              exit 1
           fi
-          akash tx deployment create akash/deploy.yml \
+          akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
