@@ -37,12 +37,11 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
           akash version
 
-      # Step 6: Debug File Path
-      - name: Debug File Path
+      # Step 6: Debug Keys
+      - name: Debug Keys
         run: |
-          echo "Current working directory: $(pwd)"
-          echo "Listing all files in current directory:"
-          ls -R
+          echo "Listing all keys in Akash CLI:"
+          akash keys list
 
       # Step 7: Deploy to Akash
       - name: Deploy to Akash
