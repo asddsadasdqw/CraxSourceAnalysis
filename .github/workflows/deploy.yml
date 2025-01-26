@@ -1,61 +1,37 @@
-name: Deploy to Akash Testnet
+#!/usr/bin/expect -f
+set timeout 20
+log_user 1
+exp_internal 1   ;# 若想查看更详细的 Expect 调试信息可以保留
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
+if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
+    puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
+    exit 1
+}
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
+expect {
+    -re {Enter keyring passphrase.*} {
+        send "$::env(KEYRING_PASSPHRASE)\r"
+    }
+    eof {
+        puts "错误：spawn 命令未成功执行。(可能找不到 akash？)"
+        exit 1
+    }
+    timeout {
+        puts "错误：spawn 命令超时。"
+        exit 1
+    }
+}
 
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
+expect {
+    -re {^(akash1[a-z0-9]+)$} {
+        set address $expect_out(1,string)
+        send_user "$address\n"
+    }
+    timeout {
+        puts "错误：未能捕获钱包地址。"
+        exit 1
+    }
+}
 
-      - name: 安装依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y expect yamllint
-
-      - name: 安装 Akash CLI
-        run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-          mkdir -p akash-cli
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
-
-          akash version
-
-      - name: 验证环境变量
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-        run: |
-          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
-          if [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "错误：KEYRING_PASSPHRASE 未设置或为空"
-            exit 1
-          fi
-          echo "环境变量验证通过"
-
-      - name: 创建密钥
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-        run: |
-          if akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
-            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
-          else
-            echo "创建新的密钥：$AKASH_KEY_NAME"
-            if ! echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file; then
-              echo "错误：密码验证失败或密钥创建失败，请检查 KEYRING_PASSPHRASE 是否正确。"
-              exit 1
-            fi
-          fi
+expect eof
