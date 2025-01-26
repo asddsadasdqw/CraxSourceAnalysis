@@ -1,91 +1,74 @@
-name: Deploy with New Key
+name: Deploy to Akash Testnet
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码（若需要用到本仓库文件）
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 第2步：安装依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect unzip
+          sudo apt-get install -y expect yamllint
 
-      # 第3步：安装 Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-
+          mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          echo "安装完成，版本信息："
+          echo "Akash CLI installed successfully:"
           akash version
 
-      # 第4步：创建一个新的 Key
-      # 注意：qq112233 长度≥8字符，符合 CLI 的口令限制
-      - name: Create Key
+      - name: Import key using Expect script
         env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
+          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
+          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
+          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
         run: |
           set -eux
-          # akash keys add 要输入两遍口令
-          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
+          echo "Writing Expect script to recover Akash key..."
+          cat <<EOF > import_key.exp
+          #!/usr/bin/expect -f
+          log_user 1
+          set timeout 60
 
-          # 再次输入口令，读取地址
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "新建 Key：$KEY_NAME，地址：$ADDR"
+          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 || [info exists ::env(AKASH_MNEMONIC)] == 0 } {
+              puts "错误：环境变量未正确设置。"
+              exit 1
+          }
 
-      # 第5步（可选）：示例查询余额
-      - name: Query Balance
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          set -eux
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "查询 $ADDR 的余额..."
-          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
-          echo "查询完成"
+          spawn akash keys add "$::env(AKASH_KEY_NAME)" --recover --keyring-backend file
+          expect "Enter keyring passphrase:"
+          send "$::env(KEYRING_PASSPHRASE)\r"
+          expect "Re-enter keyring passphrase:"
+          send "$::env(KEYRING_PASSPHRASE)\r"
+          expect "Enter your bip39 mnemonic:"
+          send "$::env(AKASH_MNEMONIC)\r"
+          expect {
+              eof {
+                  puts "密钥恢复成功！"
+                  exit 0
+              }
+              "Error: invalid mnemonic" {
+                  puts "错误：助记词无效，请检查 AKASH_MNEMONIC 的值。"
+                  exit 1
+              }
+              timeout {
+                  puts "错误：超时，请检查输入是否正确。"
+                  exit 1
+              }
+          }
+EOF
 
-      # 第6步（可选）：导出私钥（修正后的写法，用“重定向”输出到文件）
-      - name: Export Key
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-        run: |
-          set -eux
-          # 只给一个参数：key 名，输出重定向到 key.json
-          (echo "$KEY_PASSPHRASE") | akash keys export "$KEY_NAME" --keyring-backend file > key.json
-
-          # 再用 base64 编码避免换行等影响
-          base64 key.json > key.json.b64
-          echo "可将 key.json.b64 提供给“贾维斯”，并使用同样的密码“qq112233”来导入。"
-
-          # 如果需要在后续步骤中使用或让他人下载，可选择上传 Artifact:
-          # - name: Upload Key Artifact
-          #   uses: actions/upload-artifact@v3
-          #   with:
-          #     name: akash-key-export
-          #     path: key.json.b64
+          chmod +x import_key.exp
+          ./import_key.exp
