@@ -10,7 +10,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     env:
-      DOCKER_IMAGE_NAME: "q18621281648/my-app"  # 替换为实际镜像名称
+      DOCKER_IMAGE_NAME: "q18621281648/my-app"
       AKASH_KEY_NAME: "botkey"
       AKASH_NODE: "https://raw.raw.network:26657"
       AKASH_CHAIN_ID: "akashnet-2"
@@ -116,7 +116,12 @@ jobs:
         id: createdeployment
         run: |
           echo "Creating deployment on Akash..."
-          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx deployment create deployment.yaml --from "${AKASH_KEY_NAME}" --deposit "5000000uakt" --yes --keyring-backend file
+          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx deployment create deployment.yaml \
+          --from "${AKASH_KEY_NAME}" \
+          --deposit "5000000uakt" \
+          --yes \
+          --keyring-backend file \
+          --sign-mode direct
           echo "Deployment created!"
 
       # 10) 获取 Deployment Sequence
@@ -135,28 +140,9 @@ jobs:
         run: |
           DSEQ=${{ steps.getdseq.outputs.DSEQ }}
           echo "Waiting for a provider to bid on dseq=$DSEQ..."
-          sleep 30  # 简单等待，可改为循环检测
+          sleep 30  # 简单等待
           PROVIDER=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
           echo "Selected provider: $PROVIDER"
           (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx market lease create --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
           echo "Lease created!"
           echo "::set-output name=PROVIDER::$PROVIDER"
-
-      # 12) 发送 Manifest
-      - name: Send Manifest
-        run: |
-          DSEQ=${{ steps.getdseq.outputs.DSEQ }}
-          PROVIDER=${{ steps.waitforbid.outputs.PROVIDER }}
-          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
-          echo "Manifest sent!"
-
-      # 13) 获取服务 URI
-      - name: Get Service URI
-        run: |
-          DSEQ=${{ steps.getdseq.outputs.DSEQ }}
-          PROVIDER=${{ steps.waitforbid.outputs.PROVIDER }}
-          echo "Waiting for service to start..."
-          sleep 30
-          SERVICE_INFO=$(akash provider lease-status --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --service web)
-          URI=$(echo "$SERVICE_INFO" | jq -r '.uris[0]')
-          echo "Service URI: http://$URI"
