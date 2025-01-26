@@ -1,69 +1,74 @@
-name: Register and Deploy Akash Key
+name: Deploy to Akash Testnet
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
-  register-and-deploy:
-    runs-on: ubuntu-latest
+  build-and-deploy:
+    runs-on: ubuntu-22.04
 
     steps:
-      # 第1步：安装 Akash CLI
+      # 第1步：检出代码
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      # 第2步：安装依赖
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect yamllint
+
+      # 第3步：安装 Akash CLI
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-          echo "Akash CLI installed successfully:"
           akash version
 
-      # 第2步：创建新的密钥
-      - name: Register a new Akash key
+      # 第4步：验证环境变量
+      - name: Validate environment variables
         env:
-          NEW_KEY_NAME: my-new-key
-          KEYRING_PASSPHRASE: "your-secure-password"
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
-          echo "Creating a new Akash key: $NEW_KEY_NAME"
-          echo "$KEYRING_PASSPHRASE" | akash keys add "$NEW_KEY_NAME" --keyring-backend file > new-key-info.txt
+          echo "验证环境变量..."
+          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
+          echo "KEYRING_PASSPHRASE: 已设置（隐藏实际值）"
+          echo "助记词字符长度: ${#AKASH_MNEMONIC}"
 
-          echo "New key created successfully. Saving key information to new-key-info.txt."
-          cat new-key-info.txt
-
-          # 提取密钥地址
-          KEY_ADDRESS=$(grep -oP '(?<=address:\s).*' new-key-info.txt)
-          echo "Key address: $KEY_ADDRESS"
-
-          # 提取助记词
-          MNEMONIC=$(grep -oP '(?<=mnemonic:\s).*' new-key-info.txt)
-          echo "Mnemonic: $MNEMONIC"
-
-      # 第3步：传递密钥信息给贾维斯
-      - name: Submit key information to Jarvis
+      # 第5步：创建并导入密钥
+      - name: Create and import key
         env:
-          NEW_KEY_NAME: my-new-key
-          KEY_ADDRESS: ${{ steps.register-a-new-akash-key.outputs.key_address }}
-          MNEMONIC: ${{ steps.register-a-new-akash-key.outputs.mnemonic }}
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
-          echo "Sending key information to Jarvis..."
-          curl -X POST -H "Content-Type: application/json" \
-            -d '{"key_name": "'"$NEW_KEY_NAME"'", "key_address": "'"$KEY_ADDRESS"'", "mnemonic": "'"$MNEMONIC"'"}' \
-            http://jarvis.internal/submit-key
-          echo "Key information successfully submitted to Jarvis."
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+          echo "清理后的助记词: $CLEANED_MNEMONIC"
 
-      # 第4步：部署
-      - name: Deploy using new key
-        env:
-          AKASH_KEY_NAME: my-new-key
-          KEYRING_PASSPHRASE: "your-secure-password"
-        run: |
-          set -eux
-          echo "Deploying to Akash using the new key..."
-          # 部署的具体逻辑根据需求自定义
-          echo "Deployment successful!"
+          # 验证助记词的单词数量
+          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+          if [ "$WORD_COUNT" -ne 24 ]; then
+            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
+            exit 1
+          fi
+
+          # 恢复密钥
+          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
+            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
+              echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
+              exit 1
+            }
+
+          echo "密钥创建并导入成功！"
