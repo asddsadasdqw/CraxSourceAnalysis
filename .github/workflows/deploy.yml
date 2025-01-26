@@ -30,9 +30,9 @@ jobs:
 
       - name: Import key using Expect script
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
+          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
+          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
         run: |
           set -eux
           echo "清理助记词..."
@@ -77,7 +77,7 @@ jobs:
                   exit 1
               }
           }
-EOF
+          EOF
 
           chmod +x import_key.exp
           ./import_key.exp
