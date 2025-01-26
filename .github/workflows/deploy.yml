@@ -44,7 +44,15 @@ jobs:
         run: |
           echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
 
-      # Step 7: 部署到 Akash
+      # Step 7: 查询钱包余额（可选，用于验证余额是否充足）
+      - name: Check Wallet Balance
+        env:
+          AKASH_ADDRESS: ${{ secrets.AKASH_ADDRESS }}
+          AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
+        run: |
+          akash query bank balances $AKASH_ADDRESS --node $AKASH_NODE_URL
+
+      # Step 8: 部署到 Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
