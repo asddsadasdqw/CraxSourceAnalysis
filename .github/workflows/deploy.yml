@@ -36,21 +36,13 @@ jobs:
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
 
-      # Step 6: 恢复 Akash 钱包并尝试使用短密码
-      - name: Recover Akash Wallet with 112233
+      # Step 6: 恢复 Akash 钱包（清理助记词）
+      - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
         run: |
-          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< "112233"
-
-      - name: Recover Akash Wallet with qq112233
-        if: failure()  # 如果上一步失败，尝试其他密码
-        env:
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-        run: |
-          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< "qq112233"
+          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
 
       # Step 7: 查询钱包余额（可选）
       - name: Check Wallet Balance
