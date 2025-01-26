@@ -63,8 +63,8 @@ jobs:
       - name: Create or Import Akash Wallet
         run: |
           echo "Creating a new Akash wallet: ${AKASH_KEY_NAME}"
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
-          ADDR=$(echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file)
+          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}"; echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
+          ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
           echo "Wallet Address: $ADDR"
           echo "::set-output name=AKASH_ADDRESS::$ADDR"
 
@@ -116,14 +116,14 @@ jobs:
         id: createdeployment
         run: |
           echo "Creating deployment on Akash..."
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx deployment create deployment.yaml --from "${AKASH_KEY_NAME}" --deposit "5000000uakt" --yes --keyring-backend file
+          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx deployment create deployment.yaml --from "${AKASH_KEY_NAME}" --deposit "5000000uakt" --yes --keyring-backend file
           echo "Deployment created!"
 
       # 10) 获取 Deployment Sequence
       - name: Get Deployment Sequence
         id: getdseq
         run: |
-          ADDR=$(echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file)
+          ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
           DSEQ_JSON=$(akash query deployment list --owner "$ADDR" --state active -o json)
           DSEQ=$(echo "$DSEQ_JSON" | jq -r '.deployments[-1].deployment.deployment_id.dseq')
           echo "Found dseq: $DSEQ"
@@ -135,10 +135,10 @@ jobs:
         run: |
           DSEQ=${{ steps.getdseq.outputs.DSEQ }}
           echo "Waiting for a provider to bid on dseq=$DSEQ..."
-          sleep 30  # 简单等待
+          sleep 30  # 简单等待，可改为循环检测
           PROVIDER=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
           echo "Selected provider: $PROVIDER"
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx market lease create --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
+          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx market lease create --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
           echo "Lease created!"
           echo "::set-output name=PROVIDER::$PROVIDER"
 
@@ -147,7 +147,7 @@ jobs:
         run: |
           DSEQ=${{ steps.getdseq.outputs.DSEQ }}
           PROVIDER=${{ steps.waitforbid.outputs.PROVIDER }}
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
+          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
           echo "Manifest sent!"
 
       # 13) 获取服务 URI
