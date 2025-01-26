@@ -38,25 +38,12 @@ jobs:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          if [ -z "$AKASH_KEY_NAME" ]; then
-            echo "错误：AKASH_KEY_NAME 未设置"
-            exit 1
-          fi
+          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
           if [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "错误：KEYRING_PASSPHRASE 未设置"
             exit 1
           fi
           echo "环境变量验证通过"
-
-      - name: 检查密钥是否存在
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-        run: |
-          if akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
-            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
-          else
-            echo "密钥 $AKASH_KEY_NAME 不存在，准备创建。"
-          fi
 
       - name: 创建密钥
         env:
@@ -65,7 +52,10 @@ jobs:
         run: |
           if ! akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
             echo "创建新的密钥：$AKASH_KEY_NAME"
-            echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file
+            if ! echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file; then
+              echo "错误：密码验证失败或密钥创建失败。"
+              exit 1
+            fi
           else
-            echo "密钥 $AKASH_KEY_NAME 已存在，跳过创建步骤。"
+            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
           fi
