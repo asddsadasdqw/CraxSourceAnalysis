@@ -10,25 +10,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      #---------------------------------------
-      # Step 1: 检出代码
-      #---------------------------------------
+      #################################################################
+      # （A）检查出代码
+      #################################################################
       - name: Check out code
         uses: actions/checkout@v3
 
-      #---------------------------------------
-      # Step 2: 调试文件路径（可选）
-      #---------------------------------------
+      #################################################################
+      # （B）可选：调试文件目录
+      #################################################################
       - name: Debug File Path
         run: |
           echo "Current working directory: $(pwd)"
           echo "Listing files in the current directory:"
           ls -R
 
-      #---------------------------------------
-      # Step 3: 安装 Akash CLI
-      #   这里示例下载 v1.0.0-rc10 (Linux AMD64)
-      #---------------------------------------
+      #################################################################
+      # （C）安装 Akash CLI
+      # 文档参考：
+      # https://docs.akash.network/run/cli
+      #################################################################
       - name: Install Akash CLI
         run: |
           curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
@@ -42,11 +43,21 @@ jobs:
           sudo chmod +x /usr/local/bin/akash
           akash version
 
-      #---------------------------------------
-      # Step 4: 恢复钱包
-      #   - 从 GitHub Secrets 中读取：
-      #       AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE
-      #---------------------------------------
+      #################################################################
+      # （D）恢复 Akash 钱包
+      #
+      # - 需要在 GitHub Secrets 中配置:
+      #     AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE
+      #
+      # - 若你还没在本地网络（Testnet / Mainnet）创建过该地址，
+      #   或者还没在 Testnet faucet 中领取到足够币，就会报 "account not found"。
+      #
+      #   在 Testnet 下，你可访问官方水龙头：https://akash-network.test-faucet.link
+      #   输入 “akash1xxxxx” 开头的地址领取测试代币。
+      #
+      # - 文档参考：
+      #   https://docs.akash.network/run/node/keys (官方 Keys 相关)
+      #################################################################
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
@@ -55,7 +66,6 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y expect
           
-          # 检查环境变量是否存在
           if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "Error: One or more required environment variables are missing."
             exit 1
@@ -74,9 +84,14 @@ jobs:
           expect recovery-script.exp
           rm -f recovery-script.exp
 
-      #---------------------------------------
-      # Step 5: 创建或更新本地证书 (解决 .pem 文件找不到的问题)
-      #---------------------------------------
+      #################################################################
+      # （E）创建证书 (如果没有就创建，有的话就无视报错)
+      #
+      # 证书是向链上提交的，若账号上没足够余额，也会失败。
+      #
+      # 文档参考：
+      #   https://docs.akash.network/run/node/certificates
+      #################################################################
       - name: Create Akash Certificate
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
@@ -84,12 +99,7 @@ jobs:
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
-            echo "Missing environment variables for cert creation"
-            exit 1
-          fi
-
-          # 尝试创建证书，若已存在则忽略错误
+          # 若已存在同名证书，不要报错退出
           echo "$KEYRING_PASSPHRASE" | akash tx cert create client \
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
@@ -98,33 +108,44 @@ jobs:
             --sign-mode direct \
             -y || true
 
-      #---------------------------------------
-      # Step 6: 调试钱包 / 密钥信息（可选）
-      #---------------------------------------
+      #################################################################
+      # （F）可选：调试 Keys
+      #
+      #   可以查看“akash keys list”输出的地址
+      #   然后拿这个地址去 Testnet Faucet 领币
+      #################################################################
       - name: Debug Keys
         run: |
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      #---------------------------------------
-      # Step 7: 部署到 Testnet (sandbox-01)
-      #---------------------------------------
+      #################################################################
+      # （G）部署到 Testnet
+      #
+      # - SDL 文件需要命名为 deploy.yml 并放在仓库根目录
+      # - account not found 解决方案：
+      #    1. 确保你的地址真的在 sandbox-01 上
+      #    2. 并且 faucet 中领取过0.5AKT以上测试代币
+      #
+      # - 官方 CLI 文档：
+      #   https://docs.akash.network/running-an-akash-node/node-setup
+      #   https://docs.akash.network/run/cli
+      #################################################################
       - name: Deploy to Testnet
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
           AKASH_CHAIN_ID: sandbox-01
-          # 使用 HTTP 协议连接 26657
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          # 检查必要环境变量
+          # 先检查必要环境变量
           if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
             echo "Error: Missing env variables for deployment"
             exit 1
           fi
           
           if [ ! -f deploy.yml ]; then
-              echo "Error: deploy.yml not found!"
+              echo "Error: deploy.yml not found in repo root!"
               exit 1
           fi
 
@@ -132,6 +153,7 @@ jobs:
           curl --fail --max-time 10 "$AKASH_NODE_URL/status"
 
           echo "Sending deployment transaction..."
+          # 如果地址在链上没记录，就会报 account not found
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
