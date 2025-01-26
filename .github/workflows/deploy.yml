@@ -1,4 +1,4 @@
-name: Build and Push Docker Image
+name: Build, Push Docker Image and Deploy to Akash
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -15,17 +15,119 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2. 登录 Docker Hub
+      # 2. 验证 backend 文件夹是否存在
+      - name: Validate Backend Folder
+        run: |
+          if [ ! -d "./backend" ]; then
+            echo "Error: './backend' folder not found!"
+            exit 1
+          fi
+
+      # 3. 登录 Docker Hub
       - name: Log in to Docker Hub
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # 3. 构建 Docker 镜像
+      # 4. 构建 Docker 镜像
       - name: Build Docker Image
         run: |
           docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest ./backend
 
-      # 4. 推送 Docker 镜像
+      # 5. 推送 Docker 镜像
       - name: Push Docker Image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
+
+      # 6. 安装 Akash CLI
+      - name: Install Akash CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip jq
+          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+          curl -sSL "$DOWNLOAD_URL" -o akash.zip
+          unzip akash.zip -d akash-cli
+          sudo mv akash-cli/akash /usr/local/bin/akash
+          sudo chmod +x /usr/local/bin/akash
+          echo "Akash CLI installed successfully:"
+          akash version
+
+      # 7. 配置 Akash CLI
+      - name: Configure Akash CLI
+        run: |
+          mkdir -p ~/.akash
+          echo "node = '${{ secrets.AKASH_NODE_URL }}'" > ~/.akash/config.toml
+          echo "chain-id = '${{ secrets.AKASH_CHAIN_ID }}'" >> ~/.akash/config.toml
+          echo "broadcast-mode = 'block'" >> ~/.akash/config.toml
+          echo "keyring-backend = 'file'" >> ~/.akash/config.toml
+          echo "Akash config generated."
+
+      # 8. 创建或导入 Akash 钱包
+      - name: Create or Import Akash Wallet
+        run: |
+          echo "Creating or importing Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
+          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --recover --keyring-backend file
+          ADDR=$(echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file)
+          echo "Wallet Address: $ADDR"
+          echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
+
+      # 9. 生成 SDL 文件
+      - name: Generate SDL File
+        run: |
+          cat <<EOF > deployment.yaml
+          version: "2.0"
+
+          services:
+            web:
+              image: "${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest"
+              expose:
+                - port: 80
+                  as: 80
+                  to:
+                    - global: true
+
+          profiles:
+            compute:
+              basic:
+                resources:
+                  cpu:
+                    units: 0.5
+                  memory:
+                    size: 512Mi
+                  storage:
+                    size: 1Gi
+            placement:
+              basic:
+                attributes: {}
+                signedBy:
+                  anyOf: []
+                pricing:
+                  web:
+                    denom: uakt
+                    amount: 1000
+
+          deployment:
+            web:
+              profile: basic
+              count: 1
+          EOF
+          cat deployment.yaml
+
+      # 10. 创建部署
+      - name: Create Deployment
+        run: |
+          echo "Creating deployment on Akash..."
+          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx deployment create deployment.yaml \
+          --from "${{ secrets.AKASH_KEY_NAME }}" \
+          --deposit "5000000uakt" \
+          --yes \
+          --keyring-backend file \
+          --sign-mode direct
+          echo "Deployment created!"
+
+      # 11. 验证部署状态
+      - name: Verify Deployment
+        run: |
+          ADDR=$AKASH_ADDRESS
+          DSEQ=$(akash query deployment list --owner "$ADDR" --state active -o json | jq -r '.deployments[-1].deployment.deployment_id.dseq')
+          echo "Deployment Sequence: $DSEQ"
+          echo "Deployment verified!"
