@@ -37,19 +37,38 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
           akash version
 
-      # Step 6: Debug Keys
+      # Step 6: Recover Akash Wallet
+      - name: Recover Akash Wallet
+        env:
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y expect
+          echo "
+          spawn akash keys add \"$AKASH_KEY_NAME\" --recover --keyring-backend file
+          expect \"Enter your bip39 mnemonic:\"
+          send \"$AKASH_MNEMONIC\\r\"
+          expect \"Enter keyring passphrase:\"
+          send \"$KEYRING_PASSPHRASE\\r\"
+          expect \"Re-enter keyring passphrase:\"
+          send \"$KEYRING_PASSPHRASE\\r\"
+          expect eof
+          " > recovery-script.exp
+          expect recovery-script.exp
+
+      # Step 7: Debug Keys
       - name: Debug Keys
         run: |
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 7: Deploy to Akash
+      # Step 8: Deploy to Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
-        working-directory: akash
         run: |
           if [ ! -f deploy.yml ]; then
               echo "Error: deploy.yml not found!"
