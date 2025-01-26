@@ -26,10 +26,7 @@ jobs:
           ls -R
 
       #################################################################
-      # 3) 安装 Akash CLI
-      #
-      #   这里下载 v1.0.0-rc10 (Linux AMD64)。如果有更新版本，
-      #   可以修改下面下载链接
+      # 3) 安装 Akash CLI (示例用 v1.0.0-rc10)
       #################################################################
       - name: Install Akash CLI
         run: |
@@ -45,13 +42,12 @@ jobs:
           akash version
 
       #################################################################
-      # 4) 恢复 Akash 钱包 (keys)
+      # 4) 恢复钱包 (file keyring) 并自动输入助记词&密码
       #
-      #   需要在仓库 “Settings > Secrets and variables > Actions” 中
-      #   设置下列 Secrets:
-      #     - AKASH_MNEMONIC: 助记词
-      #     - AKASH_KEY_NAME: 本地 keyring 的名字 (如: mykey)
-      #     - KEYRING_PASSPHRASE: 本地 keyring 密码
+      #   需要你在 GitHub Secrets 配置：
+      #   - AKASH_MNEMONIC
+      #   - AKASH_KEY_NAME
+      #   - KEYRING_PASSPHRASE
       #################################################################
       - name: Recover Akash Wallet
         env:
@@ -60,7 +56,7 @@ jobs:
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           sudo apt-get update && sudo apt-get install -y expect
-          
+
           if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "Error: Missing environment variables (MNEMONIC, KEY_NAME, or PASSPHRASE)."
             exit 1
@@ -100,25 +96,21 @@ jobs:
             -y || true
 
       #################################################################
-      # 6) （可选）调试：列出当前 Keys，便于查看地址
+      # 6) （可选）列出当前 Keys（不一定能显示地址，
+      #     因为 file backend 也会 prompt passphrase）
       #
-      #    你可以在日志里找到 "address" 行，然后把它拿去
-      #    Testnet Faucet: https://akash-network.test-faucet.link/
-      #    领取测试代币
+      #     但还是可以看看 key name
       #################################################################
-      - name: Debug Keys
+      - name: Debug Key Names
         run: |
-          echo "Listing all keys in Akash CLI:"
-          akash keys list
+          echo "Listing key names in Akash CLI:"
+          akash keys list --keyring-backend file
 
       #################################################################
-      # 7) （新增）在部署之前，先检查余额
+      # 7) 在部署之前，先检查余额
       #
-      #    如果这里显示 "balances: []" 或 "account not found"，
-      #    表示还没给这个地址领水龙头代币/地址未初始化。
-      #
-      #    确保进入 Testnet Faucet -> 填写这里调试输出的地址
-      #    领到 >= 0.5 AKT 测试币
+      #    因为 file keyring模式下 "akash keys show <NAME>" 也会
+      #    交互式要密码，所以这里用 Expect 获取地址并保存到 $ADDR。
       #################################################################
       - name: Check Balance
         env:
@@ -127,16 +119,47 @@ jobs:
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          echo "Checking account balance on $AKASH_CHAIN_ID..."
-          ADDR=$(akash keys show "$AKASH_KEY_NAME" -a --keyring-backend file)
+          sudo apt-get update && sudo apt-get install -y expect
+
+          # 1) 用 expect 获取地址
+          cat <<'EOF' > get_address.exp
+#!/usr/bin/expect -f
+# 不显示 expect 命令的提示
+log_user 0
+
+# 启动 "akash keys show <KEYNAME> -a --keyring-backend file"
+spawn akash keys show "$env(AKASH_KEY_NAME)" -a --keyring-backend file
+
+# 等待提示输入 passphrase
+expect "Enter keyring passphrase:"
+# 输入 passphrase
+send "$env(KEYRING_PASSPHRASE)\r"
+
+# 期待下行里会打印地址
+# 这里用正则捕获 "akash1[0-9a-z]+"
+expect {
+  -re {^(akash1[a-z0-9]+)$} {
+     set address $expect_out(1,string)
+     # 把地址输出到 stdout
+     send_user "$address\n"
+  }
+}
+expect eof
+EOF
+
+          chmod +x get_address.exp
+          # 执行并把捕获到的地址保存到 ADDR
+          ADDR=$(./get_address.exp)
           echo "Your wallet address is: $ADDR"
-          echo "Querying bank balances..."
+
+          # 2) 查询余额
+          echo "Querying bank balances on $AKASH_CHAIN_ID..."
           akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
       #################################################################
-      # 8) 部署到 Testnet
+      # 8) 部署到 Testnet（发送 tx deployment create）
       #
-      #    需要在仓库根目录有 deploy.yml 文件 (SDL)
+      #   需要在仓库根目录放一个 deploy.yml (SDL)
       #################################################################
       - name: Deploy to Testnet
         env:
@@ -145,18 +168,13 @@ jobs:
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          # 1) 检查环境
-          if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
-            echo "Error: Missing env variables for deployment"
-            exit 1
-          fi
-          
+          # 1) 检查 deploy.yml 是否存在
           if [ ! -f deploy.yml ]; then
               echo "Error: deploy.yml not found!"
               exit 1
           fi
 
-          # 2) 先测试一下 RPC
+          # 2) 测试 RPC
           echo "Testing connectivity to $AKASH_NODE_URL..."
           curl --fail --max-time 10 "$AKASH_NODE_URL/status"
 
