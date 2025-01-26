@@ -1,4 +1,4 @@
-name: Deploy and Register Akash
+name: Register Kubernetes Credentials
 
 on:
   push:
@@ -7,107 +7,65 @@ on:
   pull_request:
 
 jobs:
-  register-and-deploy:
+  register-and-store:
     runs-on: ubuntu-latest
-    env:
-      DOCKER_IMAGE_NAME: "my-app"
-      KUBERNETES_NAMESPACE: "akash-services"
 
     steps:
       # 1) 检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2) 创建新的 Docker Hub 账号和密码
-      - name: Register New Docker Hub Account
+      # 2) 设置 kubeconfig 文件（用于连接到 Kubernetes 集群）
+      - name: Set up kubeconfig
         run: |
-          echo "Registering a new Docker Hub account..."
-          DOCKER_USERNAME="new-docker-user-$(date +%s)" # 自动生成用户名
-          DOCKER_PASSWORD="DockerPass$(date +%s)"      # 自动生成密码
-          echo "Docker Username: $DOCKER_USERNAME"
-          echo "Docker Password: $DOCKER_PASSWORD"
-          echo "DOCKER_USERNAME=$DOCKER_USERNAME" >> $GITHUB_ENV
-          echo "DOCKER_PASSWORD=$DOCKER_PASSWORD" >> $GITHUB_ENV
-        env:
-          GITHUB_ENV: ${{ github.workspace }}/env-vars
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG_CONTENT }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
 
-      # 3) 登录 Docker 仓库
-      - name: Log in to Docker Registry
+      # 3) 测试 Kubernetes 连接
+      - name: Test Kubernetes Connection
         run: |
-          echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+          kubectl cluster-info
+          kubectl get nodes
 
-      # 4) 构建 Docker 镜像
-      - name: Build Docker Image
+      # 4) 生成新账号密码密钥
+      - name: Generate Kubernetes Secrets
+        id: generate-secrets
         run: |
-          docker build -t ${DOCKER_IMAGE_NAME}:latest .
+          # 设置新账号和密码
+          NEW_USERNAME="new-kube-user"
+          NEW_PASSWORD=$(openssl rand -base64 12)  # 生成随机密码
+          NEW_SECRET_NAME="kube-user-secret"
 
-      # 5) 推送 Docker 镜像
-      - name: Push Docker Image
+          # 创建 Kubernetes 密钥
+          kubectl create secret generic $NEW_SECRET_NAME \
+            --from-literal=username=$NEW_USERNAME \
+            --from-literal=password=$NEW_PASSWORD \
+            -n default --dry-run=client -o yaml | kubectl apply -f -
+
+          # 输出信息到环境变量
+          echo "NEW_USERNAME=$NEW_USERNAME" >> $GITHUB_ENV
+          echo "NEW_PASSWORD=$NEW_PASSWORD" >> $GITHUB_ENV
+          echo "NEW_SECRET_NAME=$NEW_SECRET_NAME" >> $GITHUB_ENV
+          echo "Kubernetes secret $NEW_SECRET_NAME created successfully."
+
+      # 5) 验证密钥是否成功创建
+      - name: Verify Secret Creation
         run: |
-          docker push ${DOCKER_IMAGE_NAME}:latest
+          kubectl get secret $NEW_SECRET_NAME -o yaml
 
-      # 6) 安装 Kubernetes CLI 和 Helm
-      - name: Install Kubernetes CLI and Helm
+      # 6) 记录账号密码密钥（提供给贾维斯）
+      - name: Record Credentials for Jarvis
         run: |
-          sudo apt-get update
-          sudo apt-get install -y kubectl
-          wget https://get.helm.sh/helm-v3.11.0-linux-amd64.tar.gz
-          tar -zxvf helm-v3.11.0-linux-amd64.tar.gz
-          sudo mv linux-amd64/helm /usr/local/bin/helm
-          helm version
-          kubectl version --client
+          # 创建记录文件
+          echo "Kubernetes Credentials for Jarvis:" > kube_credentials.txt
+          echo "Username: $NEW_USERNAME" >> kube_credentials.txt
+          echo "Password: $NEW_PASSWORD" >> kube_credentials.txt
+          echo "Secret Name: $NEW_SECRET_NAME" >> kube_credentials.txt
 
-      # 7) 配置 Kubernetes 命名空间和标签
-      - name: Configure Kubernetes Namespace and Labels
-        run: |
-          kubectl create ns ${KUBERNETES_NAMESPACE} || echo "Namespace already exists"
-          kubectl label ns ${KUBERNETES_NAMESPACE} akash.network/name=akash-services akash.network=true --overwrite
-
-      # 8) 添加 Akash Helm 仓库并更新
-      - name: Add and Update Akash Helm Repo
-        run: |
-          helm repo remove akash || true
-          helm repo add akash https://akash-network.github.io/helm-charts
-          helm repo update
-
-      # 9) 创建新的 Akash 钱包
-      - name: Create New Akash Wallet
-        run: |
-          echo "Registering a new Akash wallet..."
-          AKASH_KEY_NAME="botkey"
-          AKASH_KEY_PASSPHRASE="AkashPass$(date +%s)"
-          echo "${AKASH_KEY_PASSPHRASE}" | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
-          ADDR=$(echo "${AKASH_KEY_PASSPHRASE}" | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file)
-          echo "Wallet Address: $ADDR"
-          echo "AKASH_KEY_NAME=$AKASH_KEY_NAME" >> $GITHUB_ENV
-          echo "AKASH_KEY_PASSPHRASE=$AKASH_KEY_PASSPHRASE" >> $GITHUB_ENV
-          echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
-
-      # 10) 验证 Akash 节点同步状态
-      - name: Verify Akash Node Sync Status
-        run: |
-          echo "Verifying Akash Node status..."
-          akash status | tee akash-status.json
-          SYNC_STATUS=$(jq -r '.SyncInfo.catching_up' akash-status.json)
-          if [ "$SYNC_STATUS" == "false" ]; then
-            echo "Akash Node is synced with the blockchain."
-          else
-            echo "Akash Node is still syncing with the blockchain."
-          fi
-
-      # 11) 保存注册凭据
-      - name: Save Credentials
-        run: |
-          mkdir -p ${{ github.workspace }}/credentials
-          echo "Docker Username: $DOCKER_USERNAME" > ${{ github.workspace }}/credentials/docker-credentials.txt
-          echo "Docker Password: $DOCKER_PASSWORD" >> ${{ github.workspace }}/credentials/docker-credentials.txt
-          echo "Akash Wallet Name: $AKASH_KEY_NAME" > ${{ github.workspace }}/credentials/akash-wallet.txt
-          echo "Akash Wallet Passphrase: $AKASH_KEY_PASSPHRASE" >> ${{ github.workspace }}/credentials/akash-wallet.txt
-          echo "Akash Wallet Address: $ADDR" >> ${{ github.workspace }}/credentials/akash-wallet.txt
-
-      # 12) 上传凭据到 GitHub Artifact
+      # 7) 将密钥记录上传为 Artifact
       - name: Upload Credentials Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: registration-credentials
-          path: ${{ github.workspace }}/credentials
+          name: kube-credentials
+          path: kube_credentials.txt
