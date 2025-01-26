@@ -36,7 +36,7 @@ jobs:
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
 
-      # Step 6: 恢复 Akash 钱包并设置短密码
+      # Step 6: 恢复 Akash 钱包（显式设置短密码）
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
