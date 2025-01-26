@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
 
 jobs:
   build-and-push:
@@ -14,16 +15,17 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2. 构建 Docker 镜像
+      # 2. 登录 Docker Hub
+      - name: Log in to Docker Hub
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      # 3. 构建 Docker 镜像
       - name: Build Docker Image
         run: |
-          docker build -t <your-docker-repo>/gpt-jarvis-backend:latest ./backend
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest ./backend
 
-      # 3. 推送 Docker 镜像
+      # 4. 推送 Docker 镜像
       - name: Push Docker Image
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
-          docker push <your-docker-repo>/gpt-jarvis-backend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
