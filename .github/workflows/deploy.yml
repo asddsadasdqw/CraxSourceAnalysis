@@ -1,4 +1,4 @@
-name: Deploy to Akash
+name: Deploy to Akash Node
 
 on:
   push:
@@ -10,73 +10,91 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     env:
-      DOCKER_IMAGE_NAME: "q18621281648/my-app"
+      DOCKER_IMAGE_NAME: "q18621281648/my-app"  # 替换为实际镜像名称
       AKASH_KEY_NAME: "botkey"
-      AKASH_NODE: "https://rpc.akashnet.net:443"  # 替换为有效的 Akash 主网节点
+      AKASH_NODE: "https://rpc.akashnet.net:443"  # 使用 Akash 主网节点
       AKASH_CHAIN_ID: "akashnet-2"
       DEPLOYMENT_NAME: "my-jarvis-bot"
+      KUBERNETES_NAMESPACE: "akash-services"
 
     steps:
       # 1) 检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2) 测试 Akash 节点连通性
-      - name: Test Akash Node Connectivity
-        run: |
-          echo "Testing connectivity to Akash node..."
-          curl -v $AKASH_NODE
-
-      # 3) 登录 Docker 仓库
+      # 2) 登录 Docker 仓库
       - name: Log in to Docker Registry
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # 4) 构建 Docker 镜像
+      # 3) 构建 Docker 镜像
       - name: Build Docker Image
         run: |
           docker build -t ${DOCKER_IMAGE_NAME}:latest .
 
-      # 5) 推送 Docker 镜像
+      # 4) 推送 Docker 镜像
       - name: Push Docker Image
         run: |
           docker push ${DOCKER_IMAGE_NAME}:latest
 
-      # 6) 安装 Akash CLI
-      - name: Install Akash CLI
+      # 5) 安装 Kubernetes CLI 和 Helm
+      - name: Install Kubernetes CLI and Helm
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect unzip jq
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
-          echo "Akash CLI installed successfully:"
-          akash version
+          sudo apt-get install -y kubectl
+          wget https://get.helm.sh/helm-v3.11.0-linux-amd64.tar.gz
+          tar -zxvf helm-v3.11.0-linux-amd64.tar.gz
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          helm version
+          kubectl version --client
 
-      # 7) 配置 Akash CLI
-      - name: Configure Akash CLI
+      # 6) 配置 Kubernetes 命名空间和标签
+      - name: Configure Kubernetes Namespace and Labels
         run: |
-          mkdir -p ~/.akash
-          echo "node = '${AKASH_NODE}'" > ~/.akash/config.toml
-          echo "chain-id = '${AKASH_CHAIN_ID}'" >> ~/.akash/config.toml
-          echo "broadcast-mode = 'block'" >> ~/.akash/config.toml
-          echo "keyring-backend = 'file'" >> ~/.akash/config.toml
-          echo "Akash config generated."
+          kubectl create ns ${KUBERNETES_NAMESPACE} || echo "Namespace already exists"
+          kubectl label ns ${KUBERNETES_NAMESPACE} akash.network/name=akash-services akash.network=true --overwrite
 
-      # 8) 创建或导入 Akash 钱包
-      - name: Create or Import Akash Wallet
+      # 7) 添加 Akash Helm 仓库并更新
+      - name: Add and Update Akash Helm Repo
         run: |
-          echo "Creating a new Akash wallet: ${AKASH_KEY_NAME}"
-          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}"; echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
-          ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
-          echo "Wallet Address: $ADDR"
-          echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
+          helm repo remove akash || true
+          helm repo add akash https://akash-network.github.io/helm-charts
+          helm repo update
 
-      # 9) 生成 SDL 文件
+      # 8) 卸载现有的 Akash 节点实例（如有）
+      - name: Uninstall Previous Akash Node
+        run: |
+          helm -n ${KUBERNETES_NAMESPACE} uninstall akash-node || echo "No previous Akash node found"
+
+      # 9) 使用 Helm 部署 Akash 节点
+      - name: Install Akash Node via Helm
+        run: |
+          helm install akash-node akash/akash-node -n ${KUBERNETES_NAMESPACE}
+          echo "Akash Node installed successfully!"
+
+      # 10) 验证 Akash 节点状态
+      - name: Verify Akash Node Pod Status
+        run: |
+          kubectl get pods -n ${KUBERNETES_NAMESPACE}
+          POD_NAME=$(kubectl get pods -n ${KUBERNETES_NAMESPACE} -l app.kubernetes.io/name=akash-node -o jsonpath="{.items[0].metadata.name}")
+          echo "Pod Name: $POD_NAME"
+          kubectl logs $POD_NAME -n ${KUBERNETES_NAMESPACE} | grep -iv peer | tail
+
+      # 11) 验证节点同步状态
+      - name: Check Akash Node Sync Status
+        run: |
+          POD_NAME=$(kubectl get pods -n ${KUBERNETES_NAMESPACE} -l app.kubernetes.io/name=akash-node -o jsonpath="{.items[0].metadata.name}")
+          kubectl exec --stdin --tty -n ${KUBERNETES_NAMESPACE} $POD_NAME -- akash status > status.json
+          cat status.json
+          SYNC_STATUS=$(jq -r '.SyncInfo.catching_up' status.json)
+          if [ "$SYNC_STATUS" == "false" ]; then
+            echo "Akash Node is synced with the blockchain."
+          else
+            echo "Akash Node is still syncing with the blockchain."
+          fi
+
+      # 12) 生成 SDL 文件
       - name: Generate SDL File
-        id: generatesdl
         run: |
           cat <<EOF > deployment.yaml
           version: "2.0"
@@ -117,9 +135,8 @@ jobs:
           EOF
           cat deployment.yaml
 
-      # 10) 创建部署
+      # 13) 创建部署
       - name: Create Deployment
-        id: createdeployment
         run: |
           echo "Creating deployment on Akash..."
           (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx deployment create deployment.yaml \
@@ -130,32 +147,10 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 11) 获取 Deployment Sequence
-      - name: Get Deployment Sequence
-        id: getdseq
+      # 14) 验证部署状态
+      - name: Verify Deployment
         run: |
-          ADDR=$(echo $AKASH_ADDRESS)
-          DSEQ_JSON=$(akash query deployment list --owner "$ADDR" --state active -o json)
-          DSEQ=$(echo "$DSEQ_JSON" | jq -r '.deployments[-1].deployment.deployment_id.dseq')
-          echo "Found dseq: $DSEQ"
-          echo "DSEQ=$DSEQ" >> $GITHUB_ENV
-
-      # 12) 等待 Bid 并创建 Lease
-      - name: Wait for Bid and Create Lease
-        run: |
-          DSEQ=$DSEQ
-          echo "Waiting for a provider to bid on dseq=$DSEQ..."
-          sleep 30
-          PROVIDER=$(akash query market bid list --owner $AKASH_ADDRESS --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
-          echo "Selected provider: $PROVIDER"
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx market lease create --owner $AKASH_ADDRESS --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
-          echo "Lease created!"
-          echo "PROVIDER=$PROVIDER" >> $GITHUB_ENV
-
-      # 13) 发送 Manifest
-      - name: Send Manifest
-        run: |
-          DSEQ=$DSEQ
-          PROVIDER=$PROVIDER
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
-          echo "Manifest sent!"
+          ADDR=$(echo "${{ secrets.AKASH_ADDRESS }}")
+          DSEQ=$(akash query deployment list --owner "$ADDR" --state active -o json | jq -r '.deployments[-1].deployment.deployment_id.dseq')
+          echo "Deployment Sequence: $DSEQ"
+          echo "Deployment verified!"
