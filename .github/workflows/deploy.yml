@@ -11,138 +11,77 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码（如需）
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 第2步：安装依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y expect yamllint
 
-      # 第3步：安装 Akash CLI (以 v1.0.0-rc10 为例，可自行换别的版本)
       - name: Install Akash CLI
         run: |
-          set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           echo "Downloading Akash CLI from $DOWNLOAD_URL"
-
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
           if [ ! -s akash.zip ]; then
               echo "下载失败或文件为空。"
               exit 1
           fi
-
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
           echo "安装完成，版本信息："
           akash version
 
-      # 第4步：验证我们所需的环境变量（Secrets）
-      - name: Verify environment variables
+      - name: Validate environment variables
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-          BIP39_SECRET: ${{ secrets.BIP39_SECRET }}
         run: |
-          set -eux
-          if [ -z "$AKASH_KEY_NAME" ]; then
-            echo "错误：AKASH_KEY_NAME 未设置"
-            exit 1
-          fi
-          if [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "错误：KEYRING_PASSPHRASE 未设置"
-            exit 1
-          fi
+          echo "验证助记词的格式..."
           if [ -z "$AKASH_MNEMONIC" ]; then
-            echo "错误：AKASH_MNEMONIC 未设置"
+            echo "错误：AKASH_MNEMONIC 未设置或为空"
             exit 1
           fi
-          echo "环境变量已正确设置"
-          echo "BIP39_SECRET 可为空，如果没有设置就默认为空字符串"
+          echo "助记词包含 $(echo "$AKASH_MNEMONIC" | wc -w) 个单词"
+          if [ "$(echo "$AKASH_MNEMONIC" | wc -w)" -ne 24 ]; then
+            echo "错误：助记词不是 24 个单词，请检查！"
+            exit 1
+          fi
 
-      # 第5步：使用助记词 (--recover) 来导入钱包
-      - name: Import key from mnemonic
+      - name: Import key from mnemonic using Expect
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-          BIP39_SECRET: ${{ secrets.BIP39_SECRET }}
         run: |
-          set -eux
-          # akash keys add --recover 交互流程：输入两次口令 + 助记词 + (可选)BIP39
-          # 如果 BIP39_SECRET 是空，就用空行；否则用实际口令
-
-          if [ -z "$BIP39_SECRET" ]; then
-            # 情况1：没有 BIP39 passphrase，最后用空行跳过
-            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$AKASH_MNEMONIC"; echo "") \
-              | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-          else
-            # 情况2：有 BIP39 passphrase
-            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$AKASH_MNEMONIC"; echo "$BIP39_SECRET") \
-              | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-          fi
-
-          echo "Key 恢复完毕！"
-
-      # 第6步：使用 Expect 脚本，自动输入 passphrase 并显示钱包地址
-      - name: Execute Expect script
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-        run: |
-          set -eux
           echo '#!/usr/bin/expect -f
-          set timeout 20
           log_user 1
+          set timeout 60
 
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
-              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
+          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 || [info exists ::env(AKASH_MNEMONIC)] == 0 } {
+              puts "错误：环境变量未正确设置。"
               exit 1
           }
 
-          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
+          spawn akash keys add "$::env(AKASH_KEY_NAME)" --recover --keyring-backend file
+          expect "Enter keyring passphrase:"
+          send "$::env(KEYRING_PASSPHRASE)\r"
+          expect "Re-enter keyring passphrase:"
+          send "$::env(KEYRING_PASSPHRASE)\r"
+          expect "Enter your bip39 mnemonic:"
+          send "$::env(AKASH_MNEMONIC)\r"
           expect {
-              -re {Enter keyring passphrase.*} {
-                  send "$::env(KEYRING_PASSPHRASE)\r"
-              }
               eof {
-                  puts "错误：spawn 命令未成功执行。(可能找不到 akash？)"
-                  exit 1
+                  puts "Key 恢复成功！"
               }
-              timeout {
-                  puts "错误：spawn 命令超时。"
-                  exit 1
-              }
-          }
-
-          expect {
-              -re {^(akash1[a-z0-9]+)$} {
-                  set address $expect_out(1,string)
-                  send_user "$address\n"
-              }
-              timeout {
-                  puts "错误：未能捕获钱包地址。"
+              "Error: invalid mnemonic" {
+                  puts "错误：助记词无效，请检查 AKASH_MNEMONIC 的值。"
                   exit 1
               }
           }
+          ' > import_key.exp
 
-          expect eof
-          ' > get_address.exp
-
-          chmod +x get_address.exp
-          ADDR=$(./get_address.exp)
-
-          if [ -z "$ADDR" ]; then
-            echo "错误：无法获取钱包地址。"
-            exit 1
-          fi
-          echo "您的钱包地址为: $ADDR"
-
-      # (可选) 这里还可以执行部署/查询余额等其他操作
-      # ...
+          chmod +x import_key.exp
+          ./import_key.exp
