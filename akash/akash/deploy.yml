@@ -1,0 +1,34 @@
+version: "2.0"
+
+services:
+  app:
+    image: q18621281648/my-app:latest
+    env:
+      - ENV_VAR=value
+    expose:
+      - port: 80
+profiles:
+  compute:
+    app:
+      resources:
+        cpu:
+          units: 100m
+        memory:
+          size: 128Mi
+        storage:
+          size: 512Mi
+  placement:
+    app:
+      attributes:
+        region: us-west
+      signedBy:
+        anyOf:
+          - akash1zxxxxxxxxxxxxxxxxxxxxx
+      pricing:
+        app:
+          denom: uakt
+          amount: 100
+deployment:
+  app:
+    profile: app
+    count: 1
