@@ -1,47 +1,163 @@
-- name: Check Balance
-  env:
-    AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-    KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-    AKASH_CHAIN_ID: sandbox-01
-    AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-  run: |
-    # Debug the akash CLI installation
-    if ! command -v akash &> /dev/null; then
-      echo "Error: Akash CLI is not installed or not in PATH."
-      exit 1
-    fi
+name: Deploy to Akash Testnet
 
-    # Verify the keyring contains the correct key
-    akash keys list --keyring-backend file
+on:
+  push:
+    branches: 
+      - main
+  pull_request:
 
-    # Write the expect script to retrieve the address
-    echo '#!/usr/bin/expect -f
-    log_user 1
-    spawn akash keys show "$env(AKASH_KEY_NAME)" -a --keyring-backend file
-    expect "Enter keyring passphrase:"
-    send "$env(KEYRING_PASSPHRASE)\r"
-    expect {
-      -re {^(akash1[a-z0-9]+)$} {
-        set address $expect_out(1,string)
-        send_user "$address\n"
-      }
-      timeout {
-        send_user "Error: Timed out waiting for response.\n"
-        exit 1
-      }
-    }
-    expect eof' > get_address.exp
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
-    chmod +x get_address.exp
-    ADDR=$(./get_address.exp)
+    steps:
+      #################################################################
+      # 1) 检出代码
+      #################################################################
+      - name: 检出代码
+        uses: actions/checkout@v3
 
-    # Verify address retrieval
-    if [ -z "$ADDR" ]; then
-      echo "Error: Unable to retrieve wallet address."
-      exit 1
-    fi
-    echo "Your wallet address is: $ADDR"
+      #################################################################
+      # 2) （可选）列出当前目录文件
+      #################################################################
+      - name: 调试当前文件目录
+        run: |
+          echo "当前工作目录: $(pwd)"
+          echo "列出当前目录中的文件:"
+          ls -R
 
-    # Query balance
-    echo "Querying bank balances on $AKASH_CHAIN_ID..."
-    akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+      #################################################################
+      # 3) 安装 Akash CLI
+      #################################################################
+      - name: 安装 Akash CLI
+        run: |
+          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
+          if [ ! -s akash.zip ]; then
+              echo "下载失败或文件为空。"
+              exit 1
+          fi
+          mkdir -p akash-cli
+          unzip akash.zip -d akash-cli
+          sudo mv akash-cli/akash /usr/local/bin/akash
+          sudo chmod +x /usr/local/bin/akash
+          akash version
+
+      #################################################################
+      # 4) 恢复钱包
+      #################################################################
+      - name: 恢复 Akash 钱包
+        env:
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y expect
+
+          if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
+            echo "错误：缺少环境变量 (MNEMONIC、KEY_NAME 或 PASSPHRASE)。"
+            exit 1
+          fi
+
+          # 写入 expect 脚本
+          echo '#!/usr/bin/expect -f
+          spawn akash keys add "$env(AKASH_KEY_NAME)" --recover --keyring-backend file
+          expect "Enter your bip39 mnemonic:"
+          send "$env(AKASH_MNEMONIC)\r"
+          expect "Enter keyring passphrase:"
+          send "$env(KEYRING_PASSPHRASE)\r"
+          expect "Re-enter keyring passphrase:"
+          send "$env(KEYRING_PASSPHRASE)\r"
+          expect eof' > recovery-script.exp
+
+          chmod +x recovery-script.exp
+          ./recovery-script.exp
+          rm -f recovery-script.exp
+
+      #################################################################
+      # 5) 创建证书
+      #################################################################
+      - name: 创建 Akash 证书
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          echo "$KEYRING_PASSPHRASE" | akash tx cert create client \
+            --chain-id "$AKASH_CHAIN_ID" \
+            --node "$AKASH_NODE_URL" \
+            --from "$AKASH_KEY_NAME" \
+            --keyring-backend file \
+            --sign-mode direct \
+            -y || true
+
+      #################################################################
+      # 6) 检查余额
+      #################################################################
+      - name: 检查余额
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          sudo apt-get update && sudo apt-get install -y expect
+
+          # 写入 expect 脚本
+          echo '#!/usr/bin/expect -f
+          log_user 1
+          spawn akash keys show "$env(AKASH_KEY_NAME)" -a --keyring-backend file
+          expect "Enter keyring passphrase:"
+          send "$env(KEYRING_PASSPHRASE)\r"
+          expect {
+            -re {^(akash1[a-z0-9]+)$} {
+              set address $expect_out(1,string)
+              send_user "$address\n"
+            }
+          }
+          expect eof' > get_address.exp
+
+          chmod +x get_address.exp
+          ADDR=$(./get_address.exp)
+
+          # 验证地址是否正确
+          if [ -z "$ADDR" ]; then
+            echo "错误：无法获取钱包地址。"
+            exit 1
+          fi
+          echo "您的钱包地址为: $ADDR"
+
+          # 查询余额
+          echo "查询 $AKASH_CHAIN_ID 上的余额..."
+          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+
+      #################################################################
+      # 7) 部署到 Testnet
+      #################################################################
+      - name: 部署到 Testnet
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          # 检查 deploy.yml 是否存在
+          if [ ! -f deploy.yml ]; then
+              echo "错误：deploy.yml 文件不存在！"
+              exit 1
+          fi
+
+          # 测试 RPC 连接
+          echo "测试与 $AKASH_NODE_URL 的连接..."
+          curl --fail --max-time 10 "$AKASH_NODE_URL/status"
+
+          # 发起部署交易
+          echo "发送部署交易..."
+          echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
+            --from "$AKASH_KEY_NAME" \
+            --chain-id "$AKASH_CHAIN_ID" \
+            --node "$AKASH_NODE_URL" \
+            --gas auto --gas-adjustment 1.25 \
+            -y --keyring-backend file --sign-mode direct
+
+          echo "部署交易已发送。"
