@@ -36,7 +36,7 @@ jobs:
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
 
-      # Step 6: 部署到 Akash
+      # Step 6: 恢复 Akash 钱包
       - name: Deploy to Akash
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
@@ -44,7 +44,7 @@ jobs:
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
         run: |
-          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file --overwrite
+          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
           akash tx deployment create akash/deploy.yml \
             --from $AKASH_KEY_NAME \
             --chain-id $AKASH_CHAIN_ID \
