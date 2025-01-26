@@ -1,4 +1,4 @@
-name: Akash Workflow
+name: Akash Workflow with Monitoring and Automation
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
       - name: Install Akash CLI
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect unzip
+          sudo apt-get install -y expect unzip curl jq
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
@@ -55,14 +55,50 @@ jobs:
           echo 'expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }' >> export_key.exp
           echo 'expect eof' >> export_key.exp
           chmod +x export_key.exp
-          ls -l export_key.exp  # 检查文件是否正确生成
           ./export_key.exp > key.json
           base64 key.json > key.json.b64
           echo "Key exported and encoded as key.json.b64"
 
-      # Step 5: Upload Key Artifact
+      # Step 5: Upload Wallet Key Artifact
       - name: Upload Wallet Key Artifact
         uses: actions/upload-artifact@v3
         with:
           name: akash-wallet-key
           path: key.json.b64
+
+      # Step 6: Monitor Services and Resources
+      - name: Health Check - Web Service
+        run: |
+          echo "Checking Web Service health..."
+          STATUS_CODE=$(curl -o /dev/null -s -w "%{http_code}" http://your-web-service-domain)
+          if [ "$STATUS_CODE" -eq 200 ]; then
+            echo "Web Service is healthy. Status Code: $STATUS_CODE"
+          else
+            echo "Web Service is unhealthy! Status Code: $STATUS_CODE"
+            exit 1
+          fi
+
+      - name: Monitor System Resources
+        run: |
+          echo "Monitoring system resources..."
+          echo "CPU Usage:" && top -bn1 | grep "Cpu(s)"
+          echo "Memory Usage:" && free -m
+          echo "Disk Usage:" && df -h
+
+      # Step 7: Deploy Akash Application
+      - name: Deploy Akash Application
+        env:
+          AKASH_ACCOUNT_ADDRESS: ${{ secrets.AKASH_ACCOUNT_ADDRESS }}
+          AKASH_KEYRING_BACKEND: file
+        run: |
+          echo "Starting Akash deployment..."
+          akash tx deployment create deploy.yaml --from $AKASH_ACCOUNT_ADDRESS --keyring-backend $AKASH_KEYRING_BACKEND --gas auto --chain-id akashnet-2
+          echo "Deployment submitted to Akash network."
+
+      # Step 8: Verify Deployment Status
+      - name: Verify Deployment Status
+        env:
+          AKASH_ACCOUNT_ADDRESS: ${{ secrets.AKASH_ACCOUNT_ADDRESS }}
+        run: |
+          echo "Verifying deployment status..."
+          akash query deployment list --owner $AKASH_ACCOUNT_ADDRESS --output json | jq .
