@@ -1,4 +1,4 @@
-name: Deploy with New Key
+name: Deploy to Akash Testnet
 
 on:
   push:
@@ -11,71 +11,56 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码（若需要）
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 第2步：安装依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect unzip
+          sudo apt-get install -y expect yamllint
 
-      # 第3步：安装 Akash CLI (以 v1.0.0-rc10 为例，你可换其它发布版本)
       - name: Install Akash CLI
         run: |
-          set -eux
-          AKASH_VERSION="v1.0.0-rc10"
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/${AKASH_VERSION}/akash_${AKASH_VERSION}_linux_amd64.zip"
-          
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
+          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-
+          mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          echo "安装完成，版本信息："
           akash version
 
-      # 第4步：创建新的密钥
-      # 注：PASSWORD写死在这里仅做演示，实际应放到Secrets: ${{ secrets.KEY_PASSPHRASE }}
-      - name: Create new ephemeral key
+      - name: Validate mnemonic
         env:
-          KEY_NAME: ephemeralkey    # 新密钥名称
-          KEY_PASSPHRASE: "123456"  # 口令(示例)，请改用Secrets存储
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
-          # akash keys add 会询问两遍口令，通过管道一次性提供
-          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") \
-            | akash keys add "$KEY_NAME" --keyring-backend file
 
-          echo "Key '$KEY_NAME' created!"
+          # 清理助记词
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
 
-      # 第5步：查看新密钥地址 (Expect脚本或直接echo)
-      - name: Show new key address
+          # 验证助记词的单词数量
+          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+          if [ "$WORD_COUNT" -ne 24 ]; then
+            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
+            exit 1
+          fi
+
+          echo "助记词已验证，准备恢复密钥..."
+
+      - name: Import key from mnemonic
         env:
-          KEY_NAME: ephemeralkey
-          KEY_PASSPHRASE: "123456"
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "New key address: $ADDR"
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
+            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
+              echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
+              exit 1
+            }
 
-      # (可选) 如果需要后续部署/查询余额，可继续写在这里
-      - name: Deploy or Query
-        env:
-          KEY_NAME: ephemeralkey
-          KEY_PASSPHRASE: "123456"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          set -eux
-          # 示例：查询余额
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Querying balance for $ADDR..."
-          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+          echo "密钥恢复成功！"
