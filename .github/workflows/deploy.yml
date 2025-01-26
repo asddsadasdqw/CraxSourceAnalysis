@@ -10,9 +10,9 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     env:
-      DOCKER_IMAGE_NAME: "q18621281648/my-app"  # 替换为实际镜像名称
+      DOCKER_IMAGE_NAME: "q18621281648/my-app"
       AKASH_KEY_NAME: "botkey"
-      AKASH_NODE: "https://rpc.akashnet.net:443"  # 使用 Akash 主网节点
+      AKASH_NODE: "https://rpc.akashnet.net:443"
       AKASH_CHAIN_ID: "akashnet-2"
       DEPLOYMENT_NAME: "my-jarvis-bot"
       KUBERNETES_NAMESPACE: "akash-services"
