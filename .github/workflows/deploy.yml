@@ -10,50 +10,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Check out the code
       - name: Check out code
         uses: actions/checkout@v3
 
+      # Step 2: Log in to Docker
       - name: Docker Login
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
+      # Step 3: Build Docker image
       - name: Build Docker image
         run: |
           docker build -t q18621281648/my-app:latest .
 
+      # Step 4: Push Docker image to the registry
       - name: Push Docker image
         run: |
           docker push q18621281648/my-app:latest
 
+      # Step 5: Install Akash CLI
       - name: Install Akash CLI
         run: |
           curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
+          akash version
 
+      # Step 6: Debug AKASH_MNEMONIC (Optional for troubleshooting)
       - name: Debug AKASH_MNEMONIC
+        if: always()
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
-          echo "Testing mnemonic:"
-          echo "$AKASH_MNEMONIC"
+          echo "Testing if AKASH_MNEMONIC is set:"
+          if [ -z "$AKASH_MNEMONIC" ]; then
+            echo "AKASH_MNEMONIC is empty!"
+            exit 1
+          else
+            echo "AKASH_MNEMONIC is set."
+          fi
 
+      # Step 7: Recover Akash Wallet
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
         run: |
-          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< ""
+          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
 
+      # Step 8: Deploy to Akash Network
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
         run: |
+          if [ ! -f akash/deploy.yml ]; then
+            echo "Error: akash/deploy.yml not found!"
+            exit 1
+          fi
           akash tx deployment create akash/deploy.yml \
-            --from $AKASH_KEY_NAME \
-            --chain-id $AKASH_CHAIN_ID \
-            --node $AKASH_NODE_URL \
+            --from "$AKASH_KEY_NAME" \
+            --chain-id "$AKASH_CHAIN_ID" \
+            --node "$AKASH_NODE_URL" \
             --gas auto --gas-adjustment 1.25 \
             -y --keyring-backend file
