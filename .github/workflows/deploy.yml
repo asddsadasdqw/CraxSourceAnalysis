@@ -36,23 +36,23 @@ jobs:
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
 
-      # Step 6: 调试助记词（可选）
-      - name: Debug AKASH_MNEMONIC
-        env:
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-        run: |
-          echo "Testing mnemonic:"
-          echo "$AKASH_MNEMONIC" | tr -d '\r'
-
-      # Step 7: 恢复 Akash 钱包
-      - name: Recover Akash Wallet
+      # Step 6: 恢复 Akash 钱包并尝试使用短密码
+      - name: Recover Akash Wallet with 112233
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
         run: |
-          echo "$AKASH_MNEMONIC" | tr -d '\r' | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
+          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< "112233"
 
-      # Step 8: 查询钱包余额（可选）
+      - name: Recover Akash Wallet with qq112233
+        if: failure()  # 如果上一步失败，尝试其他密码
+        env:
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+        run: |
+          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< "qq112233"
+
+      # Step 7: 查询钱包余额（可选）
       - name: Check Wallet Balance
         env:
           AKASH_ADDRESS: ${{ secrets.AKASH_ADDRESS }}
@@ -60,7 +60,7 @@ jobs:
         run: |
           akash query bank balances $AKASH_ADDRESS --node $AKASH_NODE_URL
 
-      # Step 9: 部署到 Akash
+      # Step 8: 部署到 Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
