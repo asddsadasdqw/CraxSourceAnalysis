@@ -1,71 +1,41 @@
-name: Register Kubernetes Credentials
+name: Deploy to Akash
 
 on:
   push:
     branches:
       - main
-  pull_request:
 
 jobs:
-  register-and-store:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) 检出代码
-      - name: Check out code
-        uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
-      # 2) 设置 kubeconfig 文件（用于连接到 Kubernetes 集群）
-      - name: Set up kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_CONTENT }}" > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
-      # 3) 测试 Kubernetes 连接
-      - name: Test Kubernetes Connection
-        run: |
-          kubectl cluster-info
-          kubectl get nodes
+    - name: Log in to DockerHub
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # 4) 生成新账号密码密钥
-      - name: Generate Kubernetes Secrets
-        id: generate-secrets
-        run: |
-          # 设置新账号和密码
-          NEW_USERNAME="new-kube-user"
-          NEW_PASSWORD=$(openssl rand -base64 12)  # 生成随机密码
-          NEW_SECRET_NAME="kube-user-secret"
+    - name: Build and Push Backend Image
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest ./backend
+        docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
 
-          # 创建 Kubernetes 密钥
-          kubectl create secret generic $NEW_SECRET_NAME \
-            --from-literal=username=$NEW_USERNAME \
-            --from-literal=password=$NEW_PASSWORD \
-            -n default --dry-run=client -o yaml | kubectl apply -f -
+    - name: Build and Push Frontend Image
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-frontend:latest ./frontend
+        docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-frontend:latest
 
-          # 输出信息到环境变量
-          echo "NEW_USERNAME=$NEW_USERNAME" >> $GITHUB_ENV
-          echo "NEW_PASSWORD=$NEW_PASSWORD" >> $GITHUB_ENV
-          echo "NEW_SECRET_NAME=$NEW_SECRET_NAME" >> $GITHUB_ENV
-          echo "Kubernetes secret $NEW_SECRET_NAME created successfully."
-
-      # 5) 验证密钥是否成功创建
-      - name: Verify Secret Creation
-        run: |
-          kubectl get secret $NEW_SECRET_NAME -o yaml
-
-      # 6) 记录账号密码密钥（提供给贾维斯）
-      - name: Record Credentials for Jarvis
-        run: |
-          # 创建记录文件
-          echo "Kubernetes Credentials for Jarvis:" > kube_credentials.txt
-          echo "Username: $NEW_USERNAME" >> kube_credentials.txt
-          echo "Password: $NEW_PASSWORD" >> kube_credentials.txt
-          echo "Secret Name: $NEW_SECRET_NAME" >> kube_credentials.txt
-
-      # 7) 将密钥记录上传为 Artifact
-      - name: Upload Credentials Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: kube-credentials
-          path: kube_credentials.txt
+    - name: Deploy to Akash
+      env:
+        AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+        AKASH_ACCOUNT_ADDRESS: ${{ secrets.AKASH_ACCOUNT_ADDRESS }}
+        AKASH_PRIVATE_KEY: ${{ secrets.AKASH_PRIVATE_KEY }}
+        AKASH_NODE: ${{ secrets.AKASH_NODE }}
+      run: |
+        echo "Deploying to Akash..."
+        akash tx deployment create deploy.yml --from $AKASH_KEY_NAME --node $AKASH_NODE --yes
+        echo "Deployment completed!"
