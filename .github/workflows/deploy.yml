@@ -10,40 +10,36 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     env:
-      # 以下环境变量可在GitHub仓库 Settings > Secrets and variables > Actions 中配置，
-      # 避免明文泄露。此处仅作示例，请根据实际情况设置。
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      DOCKER_IMAGE_NAME: "your-org/your-image"  # 改成你实际的镜像名，如 "myname/mywebapp"
-      AKASH_KEY_NAME: "botkey"                  # akash 钱包名称
+      DOCKER_IMAGE_NAME: "your-org/your-image"  # 替换为实际镜像名
+      AKASH_KEY_NAME: "botkey"
       AKASH_KEY_PASSPHRASE: ${{ secrets.AKASH_KEY_PASSPHRASE }}
-      # 如果在测试网上还需要 faucet 领取代币，可以在这里设定 TESTNET_FAUCET_URL 等
-      # 也可以设定 AKASH_NODE, AKASH_CHAIN_ID 等信息
-      AKASH_NODE: "https://raw.raw.network:26657"       # 主网或测试网节点
-      AKASH_CHAIN_ID: "akashnet-2"                      # 主网: akashnet-2；测试网可改
-      DEPLOYMENT_NAME: "my-jarvis-bot"                  # Akash上部署时的名字(自定义标识)
+      AKASH_NODE: "https://raw.raw.network:26657"  # 主网或测试网节点
+      AKASH_CHAIN_ID: "akashnet-2"
+      DEPLOYMENT_NAME: "my-jarvis-bot"
 
     steps:
-      # 1) Check out the code
+      # 1) 检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2) Log in to Docker registry (Docker Hub / GHCR / etc.)
+      # 2) 登录 Docker 仓库
       - name: Log in to Docker Registry
         run: |
           echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
 
-      # 3) Build Docker Image
+      # 3) 构建 Docker 镜像
       - name: Build Docker Image
         run: |
           docker build -t ${DOCKER_IMAGE_NAME}:latest .
 
-      # 4) Push Docker Image
+      # 4) 推送 Docker 镜像
       - name: Push Docker Image
         run: |
           docker push ${DOCKER_IMAGE_NAME}:latest
 
-      # 5) Install Akash CLI
+      # 5) 安装 Akash CLI
       - name: Install Akash CLI
         run: |
           sudo apt-get update
@@ -56,8 +52,8 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
-      # 6) 初始化默认配置（可根据需要手工设置NODE、CHAIN_ID等）
-      - name: Akash CLI config
+      # 6) 配置 Akash CLI
+      - name: Configure Akash CLI
         run: |
           mkdir -p ~/.akash
           cat <<EOF > ~/.akash/config.toml
@@ -68,8 +64,8 @@ jobs:
           EOF
           echo "Akash config generated."
 
-      # 7) 创建/导入 Akash 钱包 (这里示例：如果你想每次都新建一个钱包)
-      - name: Create new Akash wallet
+      # 7) 创建/导入 Akash 钱包
+      - name: Create or Import Akash Wallet
         run: |
           echo "Creating a new Akash wallet: ${AKASH_KEY_NAME}"
           (echo "${AKASH_KEY_PASSPHRASE}"; echo "${AKASH_KEY_PASSPHRASE}") | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
@@ -77,19 +73,8 @@ jobs:
           echo "Wallet Address: $ADDR"
           echo "::set-output name=AKASH_ADDRESS::$ADDR"
 
-      # 如果是测试网，还需要从 faucet 领取代币 (示例逻辑，可能需调整URL和参数)
-      # - name: Request test tokens from faucet
-      #   if: always()
-      #   run: |
-      #     ADDR=$( (echo "${AKASH_KEY_PASSPHRASE}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
-      #     echo "Requesting faucet for address: $ADDR"
-      #     curl -X POST -d '{"address":"'$ADDR'"}' ${TESTNET_FAUCET_URL}
-      #     # 等待到账，可以sleep几秒或轮询账户余额
-      #     sleep 15
-      #     akash query bank balances $ADDR
-
-      # 8) 编写 SDL 文件 (使用你的 Docker 镜像)
-      - name: Generate SDL
+      # 8) 生成 SDL 文件
+      - name: Generate SDL File
         id: generatesdl
         run: |
           cat <<EOF > deployment.yaml
@@ -119,11 +104,11 @@ jobs:
                 attributes: {}
                 signedBy:
                   anyOf:
-                    - "akash1xxxxxx..."    # 也可以留空表示不限制
+                    - "akash1xxxxxx..."
                 pricing:
                   web:
                     denom: uakt
-                    amount: 1000  # bid 每区块费用，根据需求调整
+                    amount: 1000
 
           deployment:
             web:
@@ -132,80 +117,52 @@ jobs:
           EOF
           cat deployment.yaml
 
-      # 9) 创建部署(tx create deployment)
+      # 9) 创建部署
       - name: Create Deployment
         id: createdeployment
         run: |
-          set -e
           echo "Creating deployment on Akash..."
-          # 这里默认押金为 5 AKT (5000000uakt)，可以根据需要修改
           (echo "${AKASH_KEY_PASSPHRASE}") | akash tx deployment create deployment.yaml --from "${AKASH_KEY_NAME}" --deposit "5000000uakt" --yes --keyring-backend file
           echo "Deployment created!"
 
-      # 10) 查询 deployment sequence / dseq
+      # 10) 获取 Deployment Sequence
       - name: Get Deployment Sequence
         id: getdseq
         run: |
           ADDR=$( (echo "${AKASH_KEY_PASSPHRASE}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
           DSEQ_JSON=$(akash query deployment list --owner "$ADDR" --state active -o json)
-          # 取最近一个 dseq
           DSEQ=$(echo "$DSEQ_JSON" | jq '.deployments[-1].deployment.deployment_id.dseq')
           echo "Found dseq: $DSEQ"
           echo "dseq=$DSEQ" >> $GITHUB_OUTPUT
 
-      # 11) 等待 bid → lease (简化逻辑，若要确保有供应商投标，可循环等待并检查)
-      - name: Wait for provider bid & create lease
+      # 11) 等待 Bid 并创建 Lease
+      - name: Wait for Bid and Create Lease
         id: waitforbid
         run: |
-          set -e
           DSEQ=${{ steps.getdseq.outputs.dseq }}
-          echo "Waiting for any provider to bid on dseq=$DSEQ..."
-
-          # 循环等待 bid
-          MAX_WAIT=60
-          INTERVAL=5
-          waited=0
-          while [ $waited -lt $MAX_WAIT ]; do
-            BIDS=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq '.bids | length')
-            if [ "$BIDS" -gt 0 ]; then
-              echo "Bid found. Bids count: $BIDS"
-              break
-            fi
-            echo "No bids yet, sleep $INTERVAL sec..."
-            sleep $INTERVAL
-            waited=$((waited + INTERVAL))
-          done
-
-          # 接受第一个 bid
+          echo "Waiting for a provider to bid on dseq=$DSEQ..."
+          sleep 30  # 简单等待，或可改为循环检测
           PROVIDER=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
           echo "Selected provider: $PROVIDER"
-
-          # 创建 lease
           (echo "${AKASH_KEY_PASSPHRASE}") | akash tx market lease create --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
           echo "Lease created!"
-
           echo "provider=$PROVIDER" >> $GITHUB_OUTPUT
 
-      # 12) 发送 manifest(必须先有 lease 才能 send-manifest)
-      - name: Send manifest
+      # 12) 发送 Manifest
+      - name: Send Manifest
         run: |
-          set -e
           DSEQ=${{ steps.getdseq.outputs.dseq }}
           PROVIDER=${{ steps.waitforbid.outputs.provider }}
           (echo "${AKASH_KEY_PASSPHRASE}") | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
           echo "Manifest sent!"
 
-      # 13) 输出最终访问地址 (需要等容器启动，可简单等待或轮询)
-      - name: Show Service URI
+      # 13) 获取服务 URI
+      - name: Get Service URI
         run: |
           DSEQ=${{ steps.getdseq.outputs.dseq }}
           PROVIDER=${{ steps.waitforbid.outputs.provider }}
-          echo "Waiting 30s for container to start..."
+          echo "Waiting for service to start..."
           sleep 30
           SERVICE_INFO=$(akash provider lease-status --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --service web)
-          echo "Lease service info:"
-          echo "$SERVICE_INFO"
-          # 解析出访问URI
           URI=$(echo "$SERVICE_INFO" | jq -r '.uris[0]')
-          echo "Service URI = $URI"
-          echo "你可以通过 http://$URI 访问部署的服务"
+          echo "Service URI: http://$URI"
