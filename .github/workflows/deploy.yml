@@ -12,7 +12,7 @@ jobs:
     env:
       DOCKER_IMAGE_NAME: "q18621281648/my-app"
       AKASH_KEY_NAME: "botkey"
-      AKASH_NODE: "https://raw.raw.network:26657"
+      AKASH_NODE: "https://rpc.akashnet.net:443"  # 替换为有效的 Akash 主网节点
       AKASH_CHAIN_ID: "akashnet-2"
       DEPLOYMENT_NAME: "my-jarvis-bot"
 
@@ -21,22 +21,28 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2) 登录 Docker 仓库
+      # 2) 测试 Akash 节点连通性
+      - name: Test Akash Node Connectivity
+        run: |
+          echo "Testing connectivity to Akash node..."
+          curl -v $AKASH_NODE
+
+      # 3) 登录 Docker 仓库
       - name: Log in to Docker Registry
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # 3) 构建 Docker 镜像
+      # 4) 构建 Docker 镜像
       - name: Build Docker Image
         run: |
           docker build -t ${DOCKER_IMAGE_NAME}:latest .
 
-      # 4) 推送 Docker 镜像
+      # 5) 推送 Docker 镜像
       - name: Push Docker Image
         run: |
           docker push ${DOCKER_IMAGE_NAME}:latest
 
-      # 5) 安装 Akash CLI
+      # 6) 安装 Akash CLI
       - name: Install Akash CLI
         run: |
           sudo apt-get update
@@ -49,7 +55,7 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
-      # 6) 配置 Akash CLI
+      # 7) 配置 Akash CLI
       - name: Configure Akash CLI
         run: |
           mkdir -p ~/.akash
@@ -59,16 +65,16 @@ jobs:
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
           echo "Akash config generated."
 
-      # 7) 创建或导入 Akash 钱包
+      # 8) 创建或导入 Akash 钱包
       - name: Create or Import Akash Wallet
         run: |
           echo "Creating a new Akash wallet: ${AKASH_KEY_NAME}"
           (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}"; echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys add "${AKASH_KEY_NAME}" --keyring-backend file
           ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
           echo "Wallet Address: $ADDR"
-          echo "::set-output name=AKASH_ADDRESS::$ADDR"
+          echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
 
-      # 8) 生成 SDL 文件
+      # 9) 生成 SDL 文件
       - name: Generate SDL File
         id: generatesdl
         run: |
@@ -111,7 +117,7 @@ jobs:
           EOF
           cat deployment.yaml
 
-      # 9) 创建部署
+      # 10) 创建部署
       - name: Create Deployment
         id: createdeployment
         run: |
@@ -124,25 +130,32 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 10) 获取 Deployment Sequence
+      # 11) 获取 Deployment Sequence
       - name: Get Deployment Sequence
         id: getdseq
         run: |
-          ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${AKASH_KEY_NAME}" -a --keyring-backend file )
+          ADDR=$(echo $AKASH_ADDRESS)
           DSEQ_JSON=$(akash query deployment list --owner "$ADDR" --state active -o json)
           DSEQ=$(echo "$DSEQ_JSON" | jq -r '.deployments[-1].deployment.deployment_id.dseq')
           echo "Found dseq: $DSEQ"
-          echo "::set-output name=DSEQ::$DSEQ"
+          echo "DSEQ=$DSEQ" >> $GITHUB_ENV
 
-      # 11) 等待 Bid 并创建 Lease
+      # 12) 等待 Bid 并创建 Lease
       - name: Wait for Bid and Create Lease
-        id: waitforbid
         run: |
-          DSEQ=${{ steps.getdseq.outputs.DSEQ }}
+          DSEQ=$DSEQ
           echo "Waiting for a provider to bid on dseq=$DSEQ..."
-          sleep 30  # 简单等待
-          PROVIDER=$(akash query market bid list --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
+          sleep 30
+          PROVIDER=$(akash query market bid list --owner $AKASH_ADDRESS --dseq $DSEQ -o json | jq -r '.bids[0].bid.bid_id.provider')
           echo "Selected provider: $PROVIDER"
-          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash tx market lease create --owner "${{ steps.createdeployment.outputs.AKASH_ADDRESS }}" --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
+          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx market lease create --owner $AKASH_ADDRESS --provider "$PROVIDER" --dseq $DSEQ --gseq 1 --oseq 1 --yes --keyring-backend file
           echo "Lease created!"
-          echo "::set-output name=PROVIDER::$PROVIDER"
+          echo "PROVIDER=$PROVIDER" >> $GITHUB_ENV
+
+      # 13) 发送 Manifest
+      - name: Send Manifest
+        run: |
+          DSEQ=$DSEQ
+          PROVIDER=$PROVIDER
+          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash provider send-manifest deployment.yaml --provider "$PROVIDER" --dseq $DSEQ --keyring-backend file
+          echo "Manifest sent!"
