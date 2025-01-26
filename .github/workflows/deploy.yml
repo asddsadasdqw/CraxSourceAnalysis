@@ -17,7 +17,7 @@ jobs:
       # Step 2: Install Akash CLI
       - name: Install Akash CLI
         run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
+          curl -sSL https://github.com/ovrclk/akash/releases/latest/download/akash_$(uname -s)_$(uname -m).zip -o akash.zip
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
@@ -62,4 +62,4 @@ jobs:
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
             --gas auto --gas-adjustment 1.25 \
-            -y --keyring-backend file
+            -y --keyring-backend file --sign-mode direct
