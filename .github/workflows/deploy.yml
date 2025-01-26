@@ -10,20 +10,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out the code
+      # Step 1: 检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: Install Akash CLI
+      # Step 2: 调试文件路径（可选）
+      - name: Debug File Path
+        run: |
+          echo "Current working directory: $(pwd)"
+          echo "Listing files in the current directory:"
+          ls -R
+
+      # Step 3: 安装 Akash CLI
       - name: Install Akash CLI
         run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/latest/download/akash_$(uname -s)_$(uname -m).zip -o akash.zip
+          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
+          if [ ! -s akash.zip ]; then
+              echo "Download failed or file is empty."
+              exit 1
+          fi
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           akash version
 
-      # Step 3: Recover Akash Wallet
+      # Step 4: 恢复 Akash 钱包
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
@@ -43,13 +54,13 @@ jobs:
           " > recovery-script.exp
           expect recovery-script.exp
 
-      # Step 4: Debug Keys
+      # Step 5: 调试密钥
       - name: Debug Keys
         run: |
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 5: Deploy to Akash
+      # Step 6: 部署到 Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
@@ -57,6 +68,10 @@ jobs:
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
+          if [ ! -f deploy.yml ]; then
+              echo "Error: deploy.yml not found!"
+              exit 1
+          fi
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
