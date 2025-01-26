@@ -24,32 +24,21 @@ jobs:
       # Step 3: Install Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
-          set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-
-          if [ ! -s akash.zip ]; then
-              echo "Download failed or file is empty."
-              exit 1
-          fi
-
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          echo "Installation complete. Version details:"
           akash version
 
-      # Step 4: Create Key (password >= 8 characters)
+      # Step 4: Create Key
       - name: Create Key
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
         run: |
-          set -eux
           (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
-
           ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
           echo "Key created: $KEY_NAME, Address: $ADDR"
 
@@ -61,52 +50,28 @@ jobs:
           AKASH_CHAIN_ID: sandbox-01
           AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
-          set -eux
           ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Querying balance for $ADDR on chain $AKASH_CHAIN_ID..."
           akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
-      # Step 6: Export Key via Expect to resolve "too many failed passphrase attempts"
-      - name: Export Key via Expect
+      # Step 6: Export Key
+      - name: Export Key
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
         run: |
-          set -eux
-
-          # Create an Expect script to handle passphrase input
           cat <<'EOF' > export_key.exp
 #!/usr/bin/expect -f
 set timeout 20
-log_user 1
-
 spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
-
-expect {
-    -re {Enter keyring passphrase.*} {
-        send "$::env(KEY_PASSPHRASE)\\r"
-        exp_continue
-    }
-    eof {}
-    timeout {
-        puts "Error: Export command timed out."
-        exit 1
-    }
-}
+expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }
 expect eof
 EOF
-
           chmod +x export_key.exp
-
-          # Redirect script output to key.json
           ./export_key.exp > key.json
-
-          # Encode key.json to base64
           base64 key.json > key.json.b64
+          echo "Key exported and encoded as key.json.b64"
 
-          echo "key.json.b64 generated. It can be imported with the same passphrase 'qq112233'."
-
-      # Step 7: Upload the base64-encoded key.json as an artifact
+      # Step 7: Upload Key Artifact
       - name: Upload Key Artifact
         uses: actions/upload-artifact@v3
         with:
