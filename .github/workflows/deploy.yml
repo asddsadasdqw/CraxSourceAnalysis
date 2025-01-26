@@ -1,4 +1,4 @@
-name: Deploy to Akash GPU Testnet
+name: Deploy to Akash Testnet
 
 on:
   push:
@@ -75,23 +75,21 @@ jobs:
           rm -f recovery-script.exp
 
       #---------------------------------------
-      # Step 5: 创建本地证书 (解决 .pem 文件找不到的问题)
-      #   - 若已创建过，可以酌情改为 "更新" 或跳过
-      #   - 这里简单粗暴每次都创建一次
+      # Step 5: 创建或更新本地证书 (解决 .pem 文件找不到的问题)
       #---------------------------------------
       - name: Create Akash Certificate
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          # GPU Testnet 参数
           AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: https://rpc.sandbox-01.aksh.pw:26657
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
           if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
             echo "Missing environment variables for cert creation"
             exit 1
           fi
 
+          # 尝试创建证书，若已存在则忽略错误
           echo "$KEYRING_PASSPHRASE" | akash tx cert create client \
             --chain-id "$AKASH_CHAIN_ID" \
             --node "$AKASH_NODE_URL" \
@@ -99,8 +97,6 @@ jobs:
             --keyring-backend file \
             --sign-mode direct \
             -y || true
-
-          # 有时证书已存在会报错，这里用 `|| true` 忽略重复错误
 
       #---------------------------------------
       # Step 6: 调试钱包 / 密钥信息（可选）
@@ -111,30 +107,31 @@ jobs:
           akash keys list
 
       #---------------------------------------
-      # Step 7: 部署到 GPU Testnet
-      #   - 需要你在仓库里准备好 deploy.yml (SDL)
-      #   - 注意：如果 SDL 里包含 GPU 资源需求，
-      #     要确保 Testnet Provider 的确支持 GPU
+      # Step 7: 部署到 Testnet (sandbox-01)
       #---------------------------------------
-      - name: Deploy to GPU Testnet
+      - name: Deploy to Testnet
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
           AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: https://rpc.sandbox-01.aksh.pw:26657
+          # 使用 HTTP 协议连接 26657
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
           # 检查必要环境变量
           if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$AKASH_NODE_URL" ]; then
             echo "Error: Missing env variables for deployment"
             exit 1
           fi
-
+          
           if [ ! -f deploy.yml ]; then
               echo "Error: deploy.yml not found!"
               exit 1
           fi
 
-          # 直接执行部署
+          echo "Testing connectivity to $AKASH_NODE_URL..."
+          curl --fail --max-time 10 "$AKASH_NODE_URL/status"
+
+          echo "Sending deployment transaction..."
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
