@@ -40,6 +40,16 @@ jobs:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
 
+      - name: 测试 Akash CLI
+        run: |
+          echo "列出所有密钥："
+          akash keys list --keyring-backend file
+          echo "显示指定密钥："
+          akash keys show "$AKASH_KEY_NAME" --keyring-backend file || echo "错误：指定的密钥不存在"
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+
       - name: 获取钱包地址
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
