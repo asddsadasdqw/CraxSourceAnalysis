@@ -55,9 +55,14 @@ jobs:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file <<< "$KEYRING_PASSPHRASE"
+          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file --keyring-passphrase "$KEYRING_PASSPHRASE"
 
-      # Step 8: Deploy to Akash Network
+      # Step 8: Verify Wallet Recovery
+      - name: Verify Wallet Recovery
+        run: |
+          akash keys list
+
+      # Step 9: Deploy to Akash Network
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
