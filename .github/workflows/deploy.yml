@@ -43,7 +43,7 @@ jobs:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
         run: |
-          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
+          echo "$AKASH_MNEMONIC" | tr -d '\r' | tr -d '\n' | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< ""
 
       - name: Deploy to Akash
         env:
