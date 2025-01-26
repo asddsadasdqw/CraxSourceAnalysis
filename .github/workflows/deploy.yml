@@ -1,4 +1,4 @@
-name: Deploy to Akash Testnet
+name: Deploy with New Key
 
 on:
   push:
@@ -8,10 +8,10 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码
+      # 第1步：检出代码（若需要）
       - name: Check out code
         uses: actions/checkout@v3
 
@@ -19,56 +19,68 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect yamllint
+          sudo apt-get install -y expect unzip
 
-      # 第3步：安装 Akash CLI
+      # 第3步：安装 Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          mkdir -p akash-cli
+          if [ ! -s akash.zip ]; then
+              echo "下载失败或文件为空。"
+              exit 1
+          fi
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
+
+          echo "安装完成，版本信息："
           akash version
 
-      # 第4步：验证环境变量
-      - name: Validate environment variables
+      # 第4步：创建新 Key
+      - name: Create Key
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"   # 至少8字符
         run: |
           set -eux
-          echo "验证环境变量..."
-          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
-          echo "KEYRING_PASSPHRASE: 已设置（隐藏实际值）"
-          echo "助记词字符长度: ${#AKASH_MNEMONIC}"
+          # akash keys add 要输入两遍口令
+          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
 
-      # 第5步：创建并导入密钥
-      - name: Create and import key
+          # 读取地址(需再次输入口令)
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "新建 Key：$KEY_NAME，地址：$ADDR"
+
+      # 第5步 (可选)：查询余额 or 进行部署
+      - name: Query Balance (示例)
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
           set -eux
-          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
-          echo "清理后的助记词: $CLEANED_MNEMONIC"
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "查询 $ADDR 在 $AKASH_CHAIN_ID 上的余额..."
+          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+          echo "查询完成"
 
-          # 验证助记词的单词数量
-          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
-          if [ "$WORD_COUNT" -ne 24 ]; then
-            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
-            exit 1
-          fi
-
-          # 恢复密钥
-          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
-            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
-              echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
-              exit 1
-            }
-
-          echo "密钥创建并导入成功！"
+      # 第6步 (可选)：导出私钥供“贾维斯”使用
+      - name: Export Key
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+        run: |
+          set -eux
+          # 导出加密JSON，需要输入一次口令
+          (echo "$KEY_PASSPHRASE") | akash keys export "$KEY_NAME" key.json --keyring-backend file
+          # 进行base64编码，以防换行影响
+          base64 key.json > key.json.b64
+          echo "可将 key.json.b64 提供给“贾维斯”，并使用同样的密码“qq112233”来导入。"
+          # 如果你想让后续步骤用到，也可用 upload-artifact:
+          #   uses: actions/upload-artifact@v3
+          #   with:
+          #     name: "akash-key-export"
+          #     path: key.json.b64
