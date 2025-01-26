@@ -1,109 +1,76 @@
-name: Deploy to Akash Testnet
+#!/usr/bin/env bash
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
+set -e  # 如果遇到错误，立即退出
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+# 更新系统并安装 expect
+sudo apt-get update && sudo apt-get install -y expect
 
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
+# 写入 expect 脚本到文件
+echo '#!/usr/bin/expect -f
+log_user 1
+exp_internal 1
 
-      - name: 安装 Akash CLI
-        run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-          mkdir -p akash-cli
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
+# 验证环境变量是否存在
+if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
+    puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
+    exit 1
+}
 
-          if ! command -v akash &> /dev/null; then
-              echo "错误：Akash CLI 未正确安装。"
-              exit 1
-          fi
-          akash version
+# 执行 spawn 命令
+spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
+expect {
+    "Enter keyring passphrase:" {
+        send "$::env(KEYRING_PASSPHRASE)\r"
+    }
+    "Error: *" {
+        puts "错误：$expect_out(buffer)"
+        exit 1
+    }
+    eof {
+        puts "错误：spawn 命令未成功执行。"
+        exit 1
+    }
+    timeout {
+        puts "错误：spawn 命令超时。"
+        exit 1
+    }
+}
 
-      - name: 验证环境变量
-        run: |
-          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
-          echo "KEYRING_PASSPHRASE: 已提供"
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+# 捕获钱包地址
+expect {
+    -re {^(akash1[a-z0-9]+)$} {
+        set address $expect_out(1,string)
+        send_user "$address\n"
+    }
+    timeout {
+        puts "错误：未能捕获钱包地址。"
+        exit 1
+    }
+}
 
-      - name: 测试 Akash CLI
-        run: |
-          echo "列出所有密钥："
-          akash keys list --keyring-backend file
-          echo "显示指定密钥："
-          akash keys show "$AKASH_KEY_NAME" --keyring-backend file || echo "错误：指定的密钥不存在"
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+expect eof
+' > get_address.exp
 
-      - name: 获取钱包地址
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-        run: |
-          sudo apt-get update && sudo apt-get install -y expect
+# 赋予脚本执行权限
+chmod +x get_address.exp
 
-          echo '#!/usr/bin/expect -f
-          log_user 1
-          exp_internal 1
+# 运行 expect 脚本并捕获钱包地址
+ADDR=$(./get_address.exp || echo "")
 
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
-              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
-              exit 1
-          }
+# 验证地址是否捕获成功
+if [ -z "$ADDR" ]; then
+    echo "错误：无法获取钱包地址。"
+    exit 1
+fi
 
-          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
-          expect {
-              "Enter keyring passphrase:" {
-                  send "$::env(KEYRING_PASSPHRASE)\r"
-              }
-              "Error: *" {
-                  puts "错误：$expect_out(buffer)"
-                  exit 1
-              }
-              eof {
-                  puts "错误：spawn 命令未成功执行。"
-                  exit 1
-              }
-              timeout {
-                  puts "错误：spawn 命令超时。"
-                  exit 1
-              }
-          }
+# 输出钱包地址
+echo "您的钱包地址为: $ADDR"
 
-          expect {
-              -re {^(akash1[a-z0-9]+)$} {
-                  set address $expect_out(1,string)
-                  send_user "$address\n"
-              }
-              timeout {
-                  puts "错误：未能捕获钱包地址。"
-                  exit 1
-              }
-          }
-
-          expect eof
-          ' > get_address.exp
-
-          chmod +x get_address.exp
-          ADDR=$(./get_address.exp)
-
-          if [ -z "$ADDR" ]; then
-            echo "错误：无法获取钱包地址。"
-            exit 1
-          fi
-          echo "您的钱包地址为: $ADDR"
+# 查询余额
+if [ -n "$ADDR" ]; then
+    echo "查询余额..."
+    akash query bank balances "$ADDR" --node "http://rpc.sandbox-01.aksh.pw:26657"
+else
+    echo "无法查询余额，因为地址无效。"
+    exit 1
+fi
