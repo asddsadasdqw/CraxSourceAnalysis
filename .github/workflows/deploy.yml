@@ -57,7 +57,7 @@ jobs:
           echo "chain-id = '${{ secrets.AKASH_CHAIN_ID }}'" >> ~/.akash/config.toml
           echo "broadcast-mode = 'block'" >> ~/.akash/config.toml
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
-          echo "Akash config generated."
+          echo "Akash config generated with node URL: ${{ secrets.AKASH_NODE_URL }}"
 
       # 8. 创建新钱包
       - name: Create New Akash Wallet
