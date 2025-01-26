@@ -15,17 +15,25 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2. 配置 Akash CLI 使用远程节点
-      - name: Configure Akash CLI
+      # 2. 安装 Akash CLI
+      - name: Install Akash CLI
         run: |
-          mkdir -p ~/.akash
-          echo "node = 'https://rpc.akashnet.net:443'" > ~/.akash/config.toml
-          echo "chain-id = 'akashnet-2'" >> ~/.akash/config.toml
-          echo "broadcast-mode = 'block'" >> ~/.akash/config.toml
-          echo "keyring-backend = 'file'" >> ~/.akash/config.toml
-          echo "Akash CLI configured to use remote node."
+          sudo apt-get update
+          sudo apt-get install -y unzip jq
+          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+          curl -sSL "$DOWNLOAD_URL" -o akash.zip
+          unzip akash.zip -d akash-cli
+          sudo mv akash-cli/akash /usr/local/bin/akash
+          sudo chmod +x /usr/local/bin/akash
+          echo "Akash CLI installed successfully."
 
-      # 3. 创建新钱包（如需要）
+      # 3. 验证 Akash CLI 是否安装成功
+      - name: Verify Akash CLI Installation
+        run: |
+          akash version
+          which akash
+
+      # 4. 创建 Akash 钱包
       - name: Create Akash Wallet
         run: |
           echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --keyring-backend file
@@ -33,7 +41,7 @@ jobs:
           echo "Wallet Address: $ADDR"
           echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
 
-      # 4. 生成 SDL 文件
+      # 5. 生成 SDL 文件
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
@@ -74,9 +82,10 @@ jobs:
               count: 1
           EOF
 
-      # 5. 创建部署
+      # 6. 创建部署
       - name: Create Deployment
         run: |
+          echo "Creating deployment on Akash..."
           echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx deployment create deployment.yaml \
           --from "${{ secrets.AKASH_KEY_NAME }}" \
           --deposit "5000000uakt" \
@@ -85,7 +94,7 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 6. 验证部署状态
+      # 7. 验证部署状态
       - name: Verify Deployment
         run: |
           ADDR=$AKASH_ADDRESS
