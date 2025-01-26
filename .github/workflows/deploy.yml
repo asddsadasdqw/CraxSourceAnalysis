@@ -68,28 +68,26 @@ jobs:
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 6: 部署到 Akash（使用主网 chain-id + HTTP(S) RPC）
+      # Step 6: 部署到 Akash
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: akashnet-2
-          # 改用 HTTPS 地址
-          AKASH_NODE_URL: https://rpc.akash.forbole.com:443
+          # 你可以继续用tcp://地址，让Akash CLI直连
+          AKASH_NODE_URL: tcp://rpc.akash.forbole.com:26657
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          # 同样，先检查必要环境变量
           if [ -z "$AKASH_KEY_NAME" ] || [ -z "$AKASH_CHAIN_ID" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "Error: One or more required environment variables (AKASH_KEY_NAME, AKASH_CHAIN_ID, KEYRING_PASSPHRASE) are missing."
             exit 1
           fi
-          
           if [ ! -f deploy.yml ]; then
-              echo "Error: deploy.yml not found!"
-              exit 1
+            echo "Error: deploy.yml not found!"
+            exit 1
           fi
 
-          echo "Testing connectivity to $AKASH_NODE_URL..."
-          curl --fail --max-time 10 "$AKASH_NODE_URL/status" || true
+          # 直接跳过 curl 测试
+          echo "Skip curl check..."
 
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
