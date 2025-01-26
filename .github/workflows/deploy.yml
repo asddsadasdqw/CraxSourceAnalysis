@@ -33,30 +33,33 @@ jobs:
 
           akash version
 
-      - name: 生成新的 Akash 密钥
+      - name: 创建密钥并导出为 JSON
         env:
-          KEYRING_PASSPHRASE: "your-secure-password" # 可设置为 GitHub Secret
+          AKASH_KEY_NAME: my-new-key
+          KEYRING_PASSPHRASE: "your-secure-password"
         run: |
-          # 创建一个新的密钥
-          echo "创建新的密钥 my-new-key"
-          echo "$KEYRING_PASSPHRASE" | akash keys add my-new-key --keyring-backend file
+          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
+          if [ -z "$KEYRING_PASSPHRASE" ]; then
+            echo "错误：KEYRING_PASSPHRASE 未设置或为空"
+            exit 1
+          fi
+          echo "密码长度为 ${#KEYRING_PASSPHRASE} 个字符"
 
-          # 导出密钥信息
+          if akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
+            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
+          else
+            echo "创建新的密钥：$AKASH_KEY_NAME"
+            if ! echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file; then
+              echo "错误：密码验证失败或密钥创建失败，请检查 KEYRING_PASSPHRASE 是否正确。"
+              exit 1
+            fi
+          fi
+
           echo "导出密钥内容为 JSON 文件"
-          echo "$KEYRING_PASSPHRASE" | akash keys export my-new-key --keyring-backend file --output json > my-new-key.json
+          if ! echo "$KEYRING_PASSPHRASE" | akash keys export "$AKASH_KEY_NAME" --keyring-backend file --output json > my-new-key.json; then
+            echo "错误：密钥导出失败"
+            exit 1
+          fi
 
-          # 输出密钥内容供后续步骤使用
-          echo "::set-output name=key_file_content::$(cat my-new-key.json | base64)"
-
-      - name: 将密钥内容打印到日志 (仅调试用途，不推荐生产中使用)
-        run: |
-          echo "显示密钥内容（调试用途）"
-          echo "${{ steps.generate-key.outputs.key_file_content }}" | base64 --decode | jq
-
-      - name: 使用密钥部署或导入到其他环境
-        env:
-          AKASH_KEY_FILE_CONTENT: "${{ steps.generate-key.outputs.key_file_content }}"
-        run: |
-          echo "导入密钥以供部署使用"
-          echo "$AKASH_KEY_FILE_CONTENT" | base64 --decode > imported-key.json
-          echo "导入成功"
+          KEY_FILE_CONTENT=$(cat my-new-key.json | base64)
+          echo "::set-output name=key_file_content::$KEY_FILE_CONTENT"
