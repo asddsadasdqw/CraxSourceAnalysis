@@ -15,30 +15,38 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2. 验证 backend 文件夹是否存在
-      - name: Validate Backend Folder
+      # 2. 调试文件结构
+      - name: Debug File Structure
         run: |
-          if [ ! -d "./backend" ]; then
-            echo "Error: './backend' folder not found!"
+          echo "Checking current directory structure:"
+          ls -al
+          echo "Checking src directory structure:"
+          ls -al ./src
+
+      # 3. 验证 Dockerfile 是否存在
+      - name: Validate Dockerfile
+        run: |
+          if [ ! -f "./Dockerfile" ]; then
+            echo "Error: Dockerfile not found in the project root!"
             exit 1
           fi
 
-      # 3. 登录 Docker Hub
+      # 4. 登录 Docker Hub
       - name: Log in to Docker Hub
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # 4. 构建 Docker 镜像
+      # 5. 构建 Docker 镜像
       - name: Build Docker Image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest ./backend
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest .
 
-      # 5. 推送 Docker 镜像
+      # 6. 推送 Docker 镜像
       - name: Push Docker Image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
 
-      # 6. 安装 Akash CLI
+      # 7. 安装 Akash CLI
       - name: Install Akash CLI
         run: |
           sudo apt-get update
@@ -51,7 +59,7 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
-      # 7. 配置 Akash CLI
+      # 8. 配置 Akash CLI
       - name: Configure Akash CLI
         run: |
           mkdir -p ~/.akash
@@ -61,7 +69,7 @@ jobs:
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
           echo "Akash config generated."
 
-      # 8. 创建或导入 Akash 钱包
+      # 9. 创建或导入 Akash 钱包
       - name: Create or Import Akash Wallet
         run: |
           echo "Creating or importing Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
@@ -70,7 +78,7 @@ jobs:
           echo "Wallet Address: $ADDR"
           echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
 
-      # 9. 生成 SDL 文件
+      # 10. 生成 SDL 文件
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
@@ -112,7 +120,7 @@ jobs:
           EOF
           cat deployment.yaml
 
-      # 10. 创建部署
+      # 11. 创建部署
       - name: Create Deployment
         run: |
           echo "Creating deployment on Akash..."
@@ -124,7 +132,7 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 11. 验证部署状态
+      # 12. 验证部署状态
       - name: Verify Deployment
         run: |
           ADDR=$AKASH_ADDRESS
