@@ -20,33 +20,23 @@ jobs:
         run: |
           echo "Checking current directory structure:"
           ls -al
-          echo "Checking src directory structure:"
-          ls -al ./src
 
-      # 3. 验证 Dockerfile 是否存在
-      - name: Validate Dockerfile
-        run: |
-          if [ ! -f "./Dockerfile" ]; then
-            echo "Error: Dockerfile not found in the project root!"
-            exit 1
-          fi
-
-      # 4. 登录 Docker Hub
+      # 3. 登录 Docker Hub
       - name: Log in to Docker Hub
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # 5. 构建 Docker 镜像
+      # 4. 构建 Docker 镜像
       - name: Build Docker Image
         run: |
           docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest .
 
-      # 6. 推送 Docker 镜像
+      # 5. 推送 Docker 镜像
       - name: Push Docker Image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
 
-      # 7. 安装 Akash CLI
+      # 6. 安装 Akash CLI
       - name: Install Akash CLI
         run: |
           sudo apt-get update
@@ -59,7 +49,7 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
-      # 8. 配置 Akash CLI
+      # 7. 配置 Akash CLI
       - name: Configure Akash CLI
         run: |
           mkdir -p ~/.akash
@@ -69,16 +59,16 @@ jobs:
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
           echo "Akash config generated."
 
-      # 9. 创建或导入 Akash 钱包
-      - name: Create or Import Akash Wallet
+      # 8. 创建新钱包
+      - name: Create New Akash Wallet
         run: |
-          echo "Creating or importing Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
-          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --recover --keyring-backend file
-          ADDR=$(echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file)
+          echo "Creating a new Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
+          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}"; echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --keyring-backend file
+          ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file )
           echo "Wallet Address: $ADDR"
           echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
 
-      # 10. 生成 SDL 文件
+      # 9. 生成 SDL 文件
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
@@ -120,7 +110,7 @@ jobs:
           EOF
           cat deployment.yaml
 
-      # 11. 创建部署
+      # 10. 创建部署
       - name: Create Deployment
         run: |
           echo "Creating deployment on Akash..."
@@ -132,7 +122,7 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 12. 验证部署状态
+      # 11. 验证部署状态
       - name: Verify Deployment
         run: |
           ADDR=$AKASH_ADDRESS
