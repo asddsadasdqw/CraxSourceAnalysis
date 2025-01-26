@@ -106,8 +106,9 @@ EOF
 
           echo "key.json.b64 generated. It can be imported with the same passphrase 'qq112233'."
 
-          # Optionally upload to artifacts
-          - uses: actions/upload-artifact@v3
-            with:
-              name: akash-key-export
-              path: key.json.b64
+      # Upload the key.json.b64 to GitHub Artifacts
+      - name: Upload Key Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: akash-key-export
+          path: key.json.b64
