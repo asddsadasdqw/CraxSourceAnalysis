@@ -15,11 +15,11 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: Install Akash CLI (v1.0.0-rc10)
+      # Step 2: Install Akash CLI and dependencies
       - name: Install Akash CLI
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip
+          sudo apt-get install -y expect unzip
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
           echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
@@ -42,71 +42,27 @@ jobs:
           echo "Wallet Name: $KEY_NAME"
           echo "Wallet Address: $ADDR"
 
-      # Step 4: Query Wallet Balance
-      - name: Query Wallet Balance
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Querying balance for $ADDR on chain $AKASH_CHAIN_ID..."
-          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
-
-      # Step 5: Export Wallet Key
+      # Step 4: Export Wallet Key
       - name: Export Wallet Key
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
         run: |
           echo "Exporting wallet key to encrypted file..."
-          echo "#!/usr/bin/expect -f" > export_key.exp
-          echo "set timeout 20" >> export_key.exp
-          echo "spawn akash keys export \"$::env(KEY_NAME)\" --keyring-backend file" >> export_key.exp
-          echo "expect \"Enter keyring passphrase:\" { send \"$::env(KEY_PASSPHRASE)\\r\" }" >> export_key.exp
-          echo "expect eof" >> export_key.exp
+          echo '#!/usr/bin/expect -f' > export_key.exp
+          echo 'set timeout 20' >> export_key.exp
+          echo 'spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file' >> export_key.exp
+          echo 'expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }' >> export_key.exp
+          echo 'expect eof' >> export_key.exp
           chmod +x export_key.exp
+          ls -l export_key.exp  # 检查文件是否正确生成
           ./export_key.exp > key.json
           base64 key.json > key.json.b64
           echo "Key exported and encoded as key.json.b64"
 
-      # Step 6: Upload Key Artifact
+      # Step 5: Upload Key Artifact
       - name: Upload Wallet Key Artifact
         uses: actions/upload-artifact@v3
         with:
           name: akash-wallet-key
           path: key.json.b64
-
-      # Step 7: Deploy Akash Application
-      - name: Deploy Akash Application
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          echo "Deploying Akash application..."
-          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "Using wallet address: $ADDR"
-          SDL_FILE="deployment.yaml"
-          akash tx deployment create "$SDL_FILE" --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
-          echo "Application deployment submitted!"
-
-      # Step 8: Associate Git Repository with Akash Deployment
-      - name: Associate Git Repository
-        env:
-          KEY_NAME: newkey
-          KEY_PASSPHRASE: "qq112233"
-          AKASH_CHAIN_ID: sandbox-01
-          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
-        run: |
-          echo "Associating current Git repository with Akash deployment..."
-          REPO_URL=$(git config --get remote.origin.url)
-          COMMIT_HASH=$(git rev-parse HEAD)
-          echo "Repository URL: $REPO_URL"
-          echo "Commit Hash: $COMMIT_HASH"
-          echo "Git Repository URL: $REPO_URL" > git_info.txt
-          echo "Commit Hash: $COMMIT_HASH" >> git_info.txt
-          akash tx deployment update git-info git_info.txt --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
-          echo "Git repository successfully associated with the deployment!"
