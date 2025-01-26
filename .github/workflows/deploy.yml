@@ -8,19 +8,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 第1步：检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
+      # 第2步：安装依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y expect yamllint
 
+      # 第3步：安装 Akash CLI
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
@@ -29,6 +31,29 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
+      # 第4步：验证环境变量
+      - name: Validate environment variables
+        env:
+          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
+          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
+          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
+        run: |
+          set -eux
+          if [ -z "$AKASH_KEY_NAME" ]; then
+            echo "错误：AKASH_KEY_NAME 未设置"
+            exit 1
+          fi
+          if [ -z "$KEYRING_PASSPHRASE" ]; then
+            echo "错误：KEYRING_PASSPHRASE 未设置"
+            exit 1
+          fi
+          if [ -z "$AKASH_MNEMONIC" ]; then
+            echo "错误：AKASH_MNEMONIC 未设置"
+            exit 1
+          fi
+          echo "环境变量已正确设置"
+
+      # 第5步：通过 Expect 脚本导入密钥
       - name: Import key using Expect script
         env:
           AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
@@ -36,7 +61,17 @@ jobs:
           AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
         run: |
           set -eux
-          echo "Writing Expect script to recover Akash key..."
+          echo "清理助记词..."
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+
+          # 验证助记词单词数量
+          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+          if [ "$WORD_COUNT" -ne 24 ]; then
+            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
+            exit 1
+          fi
+
+          echo "写入 Expect 脚本用于恢复密钥..."
           cat <<EOF > import_key.exp
           #!/usr/bin/expect -f
           log_user 1
@@ -72,3 +107,8 @@ EOF
 
           chmod +x import_key.exp
           ./import_key.exp
+
+      # 第6步：部署或查询操作
+      - name: (Optional) Perform deployment or other actions
+        run: |
+          echo "部署或其他操作可在此处添加..."
