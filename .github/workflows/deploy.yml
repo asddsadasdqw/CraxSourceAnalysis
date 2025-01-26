@@ -1,4 +1,4 @@
-name: Build, Push Docker Image and Deploy to Akash
+name: Deploy to Akash Node
 
 on:
   push:
@@ -15,60 +15,25 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2. 调试文件结构
-      - name: Debug File Structure
-        run: |
-          echo "Checking current directory structure:"
-          ls -al
-
-      # 3. 登录 Docker Hub
-      - name: Log in to Docker Hub
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      # 4. 构建 Docker 镜像
-      - name: Build Docker Image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest .
-
-      # 5. 推送 Docker 镜像
-      - name: Push Docker Image
-        run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
-
-      # 6. 安装 Akash CLI
-      - name: Install Akash CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip jq
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
-          echo "Akash CLI installed successfully:"
-          akash version
-
-      # 7. 配置 Akash CLI
+      # 2. 配置 Akash CLI 使用远程节点
       - name: Configure Akash CLI
         run: |
           mkdir -p ~/.akash
-          echo "node = '${{ secrets.AKASH_NODE_URL }}'" > ~/.akash/config.toml
-          echo "chain-id = '${{ secrets.AKASH_CHAIN_ID }}'" >> ~/.akash/config.toml
+          echo "node = 'https://rpc.akashnet.net:443'" > ~/.akash/config.toml
+          echo "chain-id = 'akashnet-2'" >> ~/.akash/config.toml
           echo "broadcast-mode = 'block'" >> ~/.akash/config.toml
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
-          echo "Akash config generated with node URL: ${{ secrets.AKASH_NODE_URL }}"
+          echo "Akash CLI configured to use remote node."
 
-      # 8. 创建新钱包
-      - name: Create New Akash Wallet
+      # 3. 创建新钱包（如需要）
+      - name: Create Akash Wallet
         run: |
-          echo "Creating a new Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
-          (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}"; echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --keyring-backend file
-          ADDR=$( (echo "${{ secrets.AKASH_KEY_PASSPHRASE }}") | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file )
+          echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys add "${{ secrets.AKASH_KEY_NAME }}" --keyring-backend file
+          ADDR=$(echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash keys show "${{ secrets.AKASH_KEY_NAME }}" -a --keyring-backend file)
           echo "Wallet Address: $ADDR"
           echo "AKASH_ADDRESS=$ADDR" >> $GITHUB_ENV
 
-      # 9. 生成 SDL 文件
+      # 4. 生成 SDL 文件
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
@@ -76,7 +41,7 @@ jobs:
 
           services:
             web:
-              image: "${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest"
+              image: "${{ secrets.DOCKER_USERNAME }}/my-app:latest"
               expose:
                 - port: 80
                   as: 80
@@ -108,12 +73,10 @@ jobs:
               profile: basic
               count: 1
           EOF
-          cat deployment.yaml
 
-      # 10. 创建部署
+      # 5. 创建部署
       - name: Create Deployment
         run: |
-          echo "Creating deployment on Akash..."
           echo "${{ secrets.AKASH_KEY_PASSPHRASE }}" | akash tx deployment create deployment.yaml \
           --from "${{ secrets.AKASH_KEY_NAME }}" \
           --deposit "5000000uakt" \
@@ -122,7 +85,7 @@ jobs:
           --sign-mode direct
           echo "Deployment created!"
 
-      # 11. 验证部署状态
+      # 6. 验证部署状态
       - name: Verify Deployment
         run: |
           ADDR=$AKASH_ADDRESS
