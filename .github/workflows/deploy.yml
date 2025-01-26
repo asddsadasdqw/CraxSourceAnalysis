@@ -1,4 +1,4 @@
-name: Deploy to Akash
+name: Build and Push Docker Image
 
 on:
   push:
@@ -6,36 +6,24 @@ on:
       - main
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      # 1. 检出代码
+      - name: Check out code
+        uses: actions/checkout@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      # 2. 构建 Docker 镜像
+      - name: Build Docker Image
+        run: |
+          docker build -t <your-docker-repo>/gpt-jarvis-backend:latest ./backend
 
-    - name: Log in to DockerHub
-      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-    - name: Build and Push Backend Image
-      run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest ./backend
-        docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-backend:latest
-
-    - name: Build and Push Frontend Image
-      run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-frontend:latest ./frontend
-        docker push ${{ secrets.DOCKER_USERNAME }}/gpt-jarvis-frontend:latest
-
-    - name: Deploy to Akash
-      env:
-        AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-        AKASH_ACCOUNT_ADDRESS: ${{ secrets.AKASH_ACCOUNT_ADDRESS }}
-        AKASH_PRIVATE_KEY: ${{ secrets.AKASH_PRIVATE_KEY }}
-        AKASH_NODE: ${{ secrets.AKASH_NODE }}
-      run: |
-        echo "Deploying to Akash..."
-        akash tx deployment create deploy.yml --from $AKASH_KEY_NAME --node $AKASH_NODE --yes
-        echo "Deployment completed!"
+      # 3. 推送 Docker 镜像
+      - name: Push Docker Image
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+          docker push <your-docker-repo>/gpt-jarvis-backend:latest
