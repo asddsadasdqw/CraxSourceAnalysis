@@ -26,9 +26,7 @@ jobs:
 
       - name: Install Akash CLI
         run: |
-          curl -sSL https://akash.network/install > install-akash.sh
-          chmod +x install-akash.sh
-          ./install-akash.sh
+          curl -sSL https://raw.githubusercontent.com/ovrclk/akash/master/godownloader.sh | sh
 
       - name: Deploy to Akash
         env:
