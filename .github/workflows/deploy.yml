@@ -65,7 +65,7 @@ jobs:
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
-          AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
+          AKASH_NODE_URL: http://rpc.testnet.akash.network:80
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           if [ ! -f deploy.yml ]; then
