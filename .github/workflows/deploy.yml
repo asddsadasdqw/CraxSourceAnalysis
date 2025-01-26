@@ -38,82 +38,31 @@ jobs:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          if [ -z "$AKASH_KEY_NAME" ]; then
-            echo "错误：AKASH_KEY_NAME 未设置"
-            exit 1
-          fi
+          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
           if [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "错误：KEYRING_PASSPHRASE 未设置"
             exit 1
           fi
-          echo "环境变量已正确设置"
+          echo "KEYRING_PASSPHRASE 已设置（长度为 ${#KEYRING_PASSPHRASE} 个字符）"
 
-      - name: 导入密钥（如果你已有key文件）
+      - name: 检查密钥是否存在
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
-          # 假设你把 key 导入为 Secrets 并且在此处回写文件
-          # echo "${{ secrets.AKASH_KEY_FILE_CONTENT }}" > keyfile.txt
-          # echo "$KEYRING_PASSPHRASE" | akash keys import "$AKASH_KEY_NAME" keyfile.txt --keyring-backend file
-          #
-          # 或者如果只是测试，也可以在这里创建一个新的(没有资金没法部署，但能演示)
-          echo "创建一个新的本地key：$AKASH_KEY_NAME"
-          echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file
-
-      - name: 执行 Expect 脚本
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-        run: |
-          echo '#!/usr/bin/expect -f
-          log_user 1
-          exp_internal 1
-
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
-              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
-              exit 1
-          }
-
-          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
-          expect {
-              "Enter keyring passphrase:" {
-                  send "$::env(KEYRING_PASSPHRASE)\r"
-              }
-              "Error: *" {
-                  puts "错误：$expect_out(buffer)"
-                  exit 1
-              }
-              eof {
-                  puts "错误：spawn 命令未成功执行。"
-                  exit 1
-              }
-              timeout {
-                  puts "错误：spawn 命令超时。"
-                  exit 1
-              }
-          }
-
-          expect {
-              -re {^(akash1[a-z0-9]+)$} {
-                  set address $expect_out(1,string)
-                  send_user "$address\n"
-              }
-              timeout {
-                  puts "错误：未能捕获钱包地址。"
-                  exit 1
-              }
-          }
-
-          expect eof
-          ' > get_address.exp
-
-          chmod +x get_address.exp
-          ADDR=$(./get_address.exp)
-
-          if [ -z "$ADDR" ]; then
-            echo "错误：无法获取钱包地址。"
-            exit 1
+          if akash keys show "$AKASH_KEY_NAME" --keyring-backend file; then
+            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
+          else
+            echo "密钥 $AKASH_KEY_NAME 不存在，准备创建。"
           fi
-          echo "您的钱包地址为: $ADDR"
 
+      - name: 创建密钥
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+        run: |
+          if ! akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
+            echo "创建新的密钥：$AKASH_KEY_NAME"
+            echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file
+          else
+            echo "密钥 $AKASH_KEY_NAME 已存在，跳过创建步骤。"
+          fi
