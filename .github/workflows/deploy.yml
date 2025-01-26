@@ -11,49 +11,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码（若需要）
+      # Step 1: Check out the code
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 第2步：安装依赖
+      # Step 2: Install dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y expect unzip
 
-      # 第3步：安装 Akash CLI (v1.0.0-rc10)
+      # Step 3: Install Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading from $DOWNLOAD_URL"
+          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
+
           if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
+              echo "Download failed or file is empty."
               exit 1
           fi
+
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
 
-          echo "安装完成，版本信息："
+          echo "Installation complete. Version details:"
           akash version
 
-      # 第4步：创建 Key（口令≥8字符，防止报“密码必须≥8字符”）
+      # Step 4: Create Key (password >= 8 characters)
       - name: Create Key
         env:
           KEY_NAME: newkey
           KEY_PASSPHRASE: "qq112233"
         run: |
           set -eux
-          # akash keys add 要输入两遍口令
           (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
 
-          # 再次输入口令，查看地址
           ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "已创建 Key：$KEY_NAME，地址：$ADDR"
+          echo "Key created: $KEY_NAME, Address: $ADDR"
 
-      # 第5步（可选）：查询余额（示例）
+      # Step 5 (Optional): Query Balance
       - name: Query Balance
         env:
           KEY_NAME: newkey
@@ -63,10 +63,10 @@ jobs:
         run: |
           set -eux
           ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
-          echo "查询 $ADDR 在 $AKASH_CHAIN_ID 上的余额..."
+          echo "Querying balance for $ADDR on chain $AKASH_CHAIN_ID..."
           akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
-      # 第6步：使用 Expect 脚本来 export Key，解决“too many failed passphrase attempts”问题
+      # Step 6: Export Key via Expect to resolve "too many failed passphrase attempts"
       - name: Export Key via Expect
         env:
           KEY_NAME: newkey
@@ -74,13 +74,12 @@ jobs:
         run: |
           set -eux
 
-          # 生成一个 Expect 脚本来输入 passphrase
+          # Create an Expect script to handle passphrase input
           cat <<'EOF' > export_key.exp
 #!/usr/bin/expect -f
 set timeout 20
 log_user 1
 
-# 调用 akash keys export，只给 key 名当参数
 spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
 
 expect {
@@ -88,12 +87,9 @@ expect {
         send "$::env(KEY_PASSPHRASE)\r"
         exp_continue
     }
-    eof {
-        # 如果没有遇到 passphrase 提示就直接EOF，也会进这里
-        # 可能说明命令结束了或出错了
-    }
+    eof {}
     timeout {
-        puts "错误：导出命令超时。"
+        puts "Error: Export command timed out."
         exit 1
     }
 }
@@ -102,16 +98,17 @@ EOF
 
           chmod +x export_key.exp
 
-          # 将脚本的标准输出重定向到 key.json 文件
+          # Redirect script output to key.json
           ./export_key.exp > key.json
 
-          # 再base64编码
+          # Encode key.json to base64
           base64 key.json > key.json.b64
 
-          echo "key.json.b64 已生成，可提供给“贾维斯”，用同口令“qq112233”导入。"
+          echo "key.json.b64 generated. It can be imported with the same passphrase 'qq112233'."
 
-          # 若要让后续步骤或别的 job 使用，可upload到Artifacts:
-          #   - uses: actions/upload-artifact@v3
-          #     with:
-          #       name: akash-key-export
-          #       path: key.json.b64
+      # Step 7: Upload the base64-encoded key.json as an artifact
+      - name: Upload Key Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: akash-key-export
+          path: key.json.b64
