@@ -42,7 +42,7 @@ jobs:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
         run: |
-          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
+          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file <<< ""
 
       # Step 7: 查询钱包余额（可选）
       - name: Check Wallet Balance
