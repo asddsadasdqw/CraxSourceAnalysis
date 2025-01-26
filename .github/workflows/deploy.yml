@@ -11,17 +11,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 检出代码（若需要）
+      # 第1步：检出代码
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 2. 安装依赖
+      # 第2步：安装依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y expect yamllint
 
-      # 3. 安装 Akash CLI (v1.0.0-rc10，可换其它版本)
+      # 第3步：安装 Akash CLI
       - name: Install Akash CLI
         run: |
           set -eux
@@ -42,13 +42,13 @@ jobs:
           echo "安装完成，版本信息："
           akash version
 
-      # 4. 验证环境变量(Secrets)，并打印助记词单词数
+      # 第4步：验证 Secrets 环境变量
       - name: Verify environment variables
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-          BIP39_SECRET: ${{ secrets.BIP39_SECRET }}
+          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
+          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
+          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
+          BIP39_SECRET: "${{ secrets.BIP39_SECRET }}"
         run: |
           set -eux
           if [ -z "$AKASH_KEY_NAME" ]; then
@@ -63,46 +63,52 @@ jobs:
             echo "错误：AKASH_MNEMONIC 未设置"
             exit 1
           fi
+          echo "环境变量已正确设置"
+          echo "BIP39_SECRET 如果为空，将默认跳过"
 
-          # 调试：打印助记词单词数，帮助排查 "invalid mnemonic"
-          WORD_COUNT=$(echo "$AKASH_MNEMONIC" | wc -w)
-          echo "Mnemonic word count is: $WORD_COUNT (应为24)"
-
-          echo "BIP39_SECRET 可为空，如果没有则留空字符串"
-
-      # 5. 使用助记词 (--recover) 来导入钱包
+      # 第5步：通过助记词导入密钥
       - name: Import key from mnemonic
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-          BIP39_SECRET: ${{ secrets.BIP39_SECRET }}
+          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
+          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
+          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
+          BIP39_SECRET: "${{ secrets.BIP39_SECRET }}"
         run: |
           set -eux
-          # akash keys add --recover 交互：两次口令 + 助记词 + (可选)BIP39
 
+          # 清理助记词，确保没有多余空格或换行符
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+
+          # 验证助记词的单词数量
+          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+          if [ "$WORD_COUNT" -ne 24 ]; then
+            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
+            exit 1
+          fi
+
+          # 根据 BIP39_SECRET 是否为空进行处理
           if [ -z "$BIP39_SECRET" ]; then
-            # 无 BIP39，第四行输入空行跳过
-            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$AKASH_MNEMONIC"; echo "") \
+            # 情况1：没有设置 BIP39 passphrase
+            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC"; echo "") \
               | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
           else
-            # 有 BIP39
-            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$AKASH_MNEMONIC"; echo "$BIP39_SECRET") \
+            # 情况2：设置了 BIP39 passphrase
+            (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC"; echo "$BIP39_SECRET") \
               | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
           fi
 
-          echo "Key 恢复完毕！"
+          echo "密钥恢复成功！"
 
-      # 6. 使用 Expect 自动输入 passphrase 并展示地址
+      # 第6步：使用 Expect 脚本显示钱包地址
       - name: Execute Expect script
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
+          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
         run: |
           set -eux
           echo '#!/usr/bin/expect -f
-          set timeout 20
           log_user 1
+          set timeout 20
 
           if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
               puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
@@ -147,4 +153,4 @@ jobs:
           fi
           echo "您的钱包地址为: $ADDR"
 
-      # (可选) 这里还可继续部署、查询余额等...
+      # (可选) 添加其他操作，如查询余额或执行部署
