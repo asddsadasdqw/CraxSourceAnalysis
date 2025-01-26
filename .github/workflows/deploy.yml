@@ -65,7 +65,7 @@ jobs:
 #!/usr/bin/expect -f
 set timeout 20
 spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
-expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\\r" }
+expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\r" }
 expect eof
 EOF
           chmod +x export_key.exp
@@ -95,3 +95,22 @@ EOF
           SDL_FILE="deployment.yaml"
           akash tx deployment create "$SDL_FILE" --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
           echo "Application deployment submitted!"
+
+      # Step 8: Associate Git Repository with Akash Deployment
+      - name: Associate Git Repository
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          echo "Associating current Git repository with Akash deployment..."
+          REPO_URL=$(git config --get remote.origin.url)
+          COMMIT_HASH=$(git rev-parse HEAD)
+          echo "Repository URL: $REPO_URL"
+          echo "Commit Hash: $COMMIT_HASH"
+          # 示例：记录 Git 信息到 Akash 网络或其他持久化存储
+          echo "Git Repository URL: $REPO_URL" > git_info.txt
+          echo "Commit Hash: $COMMIT_HASH" >> git_info.txt
+          akash tx deployment update git-info git_info.txt --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
+          echo "Git repository successfully associated with the deployment!"
