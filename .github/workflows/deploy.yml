@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out code
@@ -21,26 +21,13 @@ jobs:
 
       - name: Install Akash CLI
         run: |
-          set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
           akash version
-
-      - name: Validate environment variables
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-        run: |
-          set -eux
-          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
-          echo "KEYRING_PASSPHRASE: ${#KEYRING_PASSPHRASE} characters (隐藏实际值)"
-          echo "AKASH_MNEMONIC: ${#AKASH_MNEMONIC} characters (隐藏实际值)"
 
       - name: Import key from mnemonic
         env:
@@ -49,12 +36,27 @@ jobs:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
+
+          # 清理助记词
           CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+
+          # 验证助记词的单词数量
           WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
           if [ "$WORD_COUNT" -ne 24 ]; then
             echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
             exit 1
           fi
+
+          # 调试输入值
+          echo "密钥名称: $AKASH_KEY_NAME"
+          echo "清理后的助记词: $CLEANED_MNEMONIC"
+          echo "密码长度: ${#KEYRING_PASSPHRASE}"
+
+          # 恢复密钥
           (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
-            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-          echo "密钥导入成功！"
+            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
+              echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
+              exit 1
+            }
+
+          echo "密钥恢复成功！"
