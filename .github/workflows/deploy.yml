@@ -1,87 +1,65 @@
-name: Deploy to Akash Testnet
+#!/bin/bash
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
+set -e  # 遇到错误立即退出
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+# 验证环境变量
+echo "验证环境变量..."
+if [ -z "$AKASH_KEY_NAME" ]; then
+  echo "错误：AKASH_KEY_NAME 未设置或为空"
+  exit 1
+fi
+if [ -z "$KEYRING_PASSPHRASE" ]; then
+  echo "错误：KEYRING_PASSPHRASE 未设置或为空"
+  exit 1
+fi
+if [ -z "$AKASH_MNEMONIC" ]; then
+  echo "错误：AKASH_MNEMONIC 未设置或为空"
+  exit 1
+fi
 
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
+# 清理助记词
+CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+if [ "$WORD_COUNT" -ne 24 ]; then
+  echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
+  exit 1
+fi
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y expect yamllint
+# 输出调试信息
+echo "密钥名称: $AKASH_KEY_NAME"
+echo "清理后的助记词: $CLEANED_MNEMONIC"
 
-      - name: Install Akash CLI
-        run: |
-          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
-          echo "Downloading Akash CLI from $DOWNLOAD_URL"
-          curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          if [ ! -s akash.zip ]; then
-              echo "下载失败或文件为空。"
-              exit 1
-          fi
-          mkdir -p akash-cli
-          unzip akash.zip -d akash-cli
-          sudo mv akash-cli/akash /usr/local/bin/akash
-          sudo chmod +x /usr/local/bin/akash
-          echo "安装完成，版本信息："
-          akash version
+# 写入并运行 expect 脚本
+echo '#!/usr/bin/expect -f
+log_user 1
+set timeout 60
 
-      - name: Validate environment variables
-        env:
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-        run: |
-          echo "验证助记词的格式..."
-          if [ -z "$AKASH_MNEMONIC" ]; then
-            echo "错误：AKASH_MNEMONIC 未设置或为空"
-            exit 1
-          fi
-          echo "助记词包含 $(echo "$AKASH_MNEMONIC" | wc -w) 个单词"
-          if [ "$(echo "$AKASH_MNEMONIC" | wc -w)" -ne 24 ]; then
-            echo "错误：助记词不是 24 个单词，请检查！"
-            exit 1
-          fi
+if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 || [info exists ::env(AKASH_MNEMONIC)] == 0 } {
+    puts "错误：环境变量未正确设置。"
+    exit 1
+}
 
-      - name: Import key from mnemonic using Expect
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-        run: |
-          echo '#!/usr/bin/expect -f
-          log_user 1
-          set timeout 60
+spawn akash keys add "$::env(AKASH_KEY_NAME)" --recover --keyring-backend file
+expect "Enter keyring passphrase:"
+send "$::env(KEYRING_PASSPHRASE)\r"
+expect "Re-enter keyring passphrase:"
+send "$::env(KEYRING_PASSPHRASE)\r"
+expect "Enter your bip39 mnemonic:"
+send "$::env(AKASH_MNEMONIC)\r"
+expect {
+    eof {
+        puts "Key 恢复成功！"
+    }
+    "Error: invalid mnemonic" {
+        puts "错误：助记词无效，请检查 AKASH_MNEMONIC 的值。"
+        exit 1
+    }
+    timeout {
+        puts "错误：超时，请检查输入是否正确。"
+        exit 1
+    }
+}
+' > import_key.exp
 
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 || [info exists ::env(AKASH_MNEMONIC)] == 0 } {
-              puts "错误：环境变量未正确设置。"
-              exit 1
-          }
-
-          spawn akash keys add "$::env(AKASH_KEY_NAME)" --recover --keyring-backend file
-          expect "Enter keyring passphrase:"
-          send "$::env(KEYRING_PASSPHRASE)\r"
-          expect "Re-enter keyring passphrase:"
-          send "$::env(KEYRING_PASSPHRASE)\r"
-          expect "Enter your bip39 mnemonic:"
-          send "$::env(AKASH_MNEMONIC)\r"
-          expect {
-              eof {
-                  puts "Key 恢复成功！"
-              }
-              "Error: invalid mnemonic" {
-                  puts "错误：助记词无效，请检查 AKASH_MNEMONIC 的值。"
-                  exit 1
-              }
-          }
-          ' > import_key.exp
-
-          chmod +x import_key.exp
-          ./import_key.exp
+chmod +x import_key.exp
+./import_key.exp
