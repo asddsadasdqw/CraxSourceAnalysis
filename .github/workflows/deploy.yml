@@ -17,12 +17,26 @@ jobs:
       - name: 安装依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect
+          sudo apt-get install -y expect yamllint
+
+      - name: 安装 Akash CLI
+        run: |
+          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
+          if [ ! -s akash.zip ]; then
+              echo "下载失败或文件为空。"
+              exit 1
+          fi
+          mkdir -p akash-cli
+          unzip akash.zip -d akash-cli
+          sudo mv akash-cli/akash /usr/local/bin/akash
+          sudo chmod +x /usr/local/bin/akash
+
+          akash version
 
       - name: 验证环境变量
         env:
-          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
-          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           if [ -z "$AKASH_KEY_NAME" ]; then
             echo "错误：AKASH_KEY_NAME 未设置"
@@ -34,7 +48,23 @@ jobs:
           fi
           echo "环境变量已正确设置"
 
-      - name: 写入并运行 Expect 脚本
+      - name: 导入密钥（如果你已有key文件）
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+        run: |
+          # 假设你把 key 导入为 Secrets 并且在此处回写文件
+          # echo "${{ secrets.AKASH_KEY_FILE_CONTENT }}" > keyfile.txt
+          # echo "$KEYRING_PASSPHRASE" | akash keys import "$AKASH_KEY_NAME" keyfile.txt --keyring-backend file
+          #
+          # 或者如果只是测试，也可以在这里创建一个新的(没有资金没法部署，但能演示)
+          echo "创建一个新的本地key：$AKASH_KEY_NAME"
+          echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file
+
+      - name: 执行 Expect 脚本
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           echo '#!/usr/bin/expect -f
           log_user 1
@@ -86,3 +116,4 @@ jobs:
             exit 1
           fi
           echo "您的钱包地址为: $ADDR"
+
