@@ -37,7 +37,18 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
           akash version
 
-      # Step 6: Recover Akash Wallet using expect
+      # Step 6: Debug secrets (Optional for troubleshooting)
+      - name: Debug Secrets
+        if: always()
+        env:
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+        run: |
+          echo "Testing secrets:"
+          echo "AKASH_MNEMONIC length: ${#AKASH_MNEMONIC}"
+          echo "KEYRING_PASSPHRASE length: ${#KEYRING_PASSPHRASE}"
+
+      # Step 7: Recover Akash Wallet
       - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
@@ -46,22 +57,22 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y expect
           expect <<EOF
-          spawn akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-          expect "Enter your bip39 mnemonic:"
-          send "$AKASH_MNEMONIC\r"
-          expect "Enter keyring passphrase:"
-          send "$KEYRING_PASSPHRASE\r"
-          expect "Re-enter keyring passphrase:"
-          send "$KEYRING_PASSPHRASE\r"
-          expect eof
+            spawn akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
+            expect "Enter your bip39 mnemonic:"
+            send "$AKASH_MNEMONIC\r"
+            expect "Enter keyring passphrase:"
+            send "$KEYRING_PASSPHRASE\r"
+            expect "Re-enter keyring passphrase:"
+            send "$KEYRING_PASSPHRASE\r"
+            expect eof
 EOF
 
-      # Step 7: Verify Wallet Recovery
+      # Step 8: Verify Wallet Recovery
       - name: Verify Wallet Recovery
         run: |
           akash keys list
 
-      # Step 8: Deploy to Akash Network
+      # Step 9: Deploy to Akash Network
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
