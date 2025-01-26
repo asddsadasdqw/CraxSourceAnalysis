@@ -1,4 +1,4 @@
-name: Deploy to Akash Testnet
+name: Deploy with Akash RC10
 
 on:
   push:
@@ -8,59 +8,54 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # 默认Runner环境
 
     steps:
+      # 第1步：检出代码（若需要使用仓库文件，可保留；否则可删除）
       - name: Check out code
         uses: actions/checkout@v3
 
+      # 第2步：安装依赖 (unzip, expect 等)
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect yamllint
+          sudo apt-get install -y expect unzip
 
+      # 第3步：下载并安装 Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
+          set -eux
+          # 注意：官方文件名就是 "akash_1.0.0-rc10_linux_amd64.zip"
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+
+          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          mkdir -p akash-cli
+          if [ ! -s akash.zip ]; then
+              echo "下载失败或文件为空。"
+              exit 1
+          fi
+
+          # 解压
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
+
+          echo "安装完成，版本信息："
           akash version
 
-      - name: Validate mnemonic
+      # (可选) 第4步：演示新建一个 Key 并显示地址
+      - name: Create a new key & show address
         env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          KEY_NAME: demo-key
+          KEY_PASSPHRASE: "123456"    # 演示用；正式应放到 GitHub Secrets
         run: |
           set -eux
+          # 创建 Key，需要输入两遍口令
+          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
 
-          # 清理助记词
-          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+          # 读取地址（需再次输入口令）
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "新建 Key：$KEY_NAME，地址：$ADDR"
 
-          # 验证助记词的单词数量
-          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
-          if [ "$WORD_COUNT" -ne 24 ]; then
-            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
-            exit 1
-          fi
-
-          echo "助记词已验证，准备恢复密钥..."
-
-      - name: Import key from mnemonic
-        env:
-          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
-          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
-          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
-        run: |
-          set -eux
-          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
-          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
-            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
-              echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
-              exit 1
-            }
-
-          echo "密钥恢复成功！"
+      # (可选) 第5步：后续可做查询余额/部署等
+      # ...
