@@ -44,7 +44,6 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y expect
           
-          # 如果必要，先验证一下环境变量是否存在
           if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "Error: One or more required environment variables (AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE) are missing."
             exit 1
@@ -61,8 +60,6 @@ jobs:
           expect eof
           " > recovery-script.exp
           expect recovery-script.exp
-
-          # 删除临时文件
           rm -f recovery-script.exp
 
       # Step 5: 调试密钥
@@ -71,13 +68,13 @@ jobs:
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 6: 部署到 Akash（使用主网 chain-id）
+      # Step 6: 部署到 Akash（使用主网 chain-id + HTTP(S) RPC）
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: akashnet-2
-          # 使用 tcp 协议 + 26657 端口
-          AKASH_NODE_URL: tcp://rpc.akash.forbole.com:26657
+          # 改用 HTTPS 地址
+          AKASH_NODE_URL: https://rpc.akash.forbole.com:443
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           # 同样，先检查必要环境变量
@@ -85,13 +82,12 @@ jobs:
             echo "Error: One or more required environment variables (AKASH_KEY_NAME, AKASH_CHAIN_ID, KEYRING_PASSPHRASE) are missing."
             exit 1
           fi
-
+          
           if [ ! -f deploy.yml ]; then
               echo "Error: deploy.yml not found!"
               exit 1
           fi
 
-          # 可选：调试 RPC 节点是否返回正常 JSON
           echo "Testing connectivity to $AKASH_NODE_URL..."
           curl --fail --max-time 10 "$AKASH_NODE_URL/status" || true
 
