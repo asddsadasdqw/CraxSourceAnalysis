@@ -11,55 +11,139 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 检出代码
+      - name: Check out code
         uses: actions/checkout@v3
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y expect yamllint
 
-      - name: 安装 Akash CLI
+      - name: Install Akash CLI
         run: |
-          curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
+          set -eux
+          DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+          echo "Downloading Akash CLI from $DOWNLOAD_URL"
+
+          curl -sSL "$DOWNLOAD_URL" -o akash.zip
           if [ ! -s akash.zip ]; then
               echo "下载失败或文件为空。"
               exit 1
           fi
+
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
 
+          echo "安装完成，版本信息："
           akash version
 
-      - name: 创建密钥并导出为 JSON
+      # 验证基础的 Secrets 是否存在
+      - name: Verify environment variables
         env:
-          AKASH_KEY_NAME: my-new-key
-          KEYRING_PASSPHRASE: "your-secure-password"
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
-          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
+          set -eux
+          if [ -z "$AKASH_KEY_NAME" ]; then
+            echo "错误：AKASH_KEY_NAME 未设置"
+            exit 1
+          fi
           if [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "错误：KEYRING_PASSPHRASE 未设置或为空"
+            echo "错误：KEYRING_PASSPHRASE 未设置"
             exit 1
           fi
-          echo "密码长度为 ${#KEYRING_PASSPHRASE} 个字符"
+          if [ -z "$AKASH_MNEMONIC" ]; then
+            echo "错误：AKASH_MNEMONIC 未设置"
+            exit 1
+          fi
+          echo "环境变量已正确设置"
 
-          if akash keys show "$AKASH_KEY_NAME" --keyring-backend file &>/dev/null; then
-            echo "密钥 $AKASH_KEY_NAME 已存在，无需重复创建。"
-          else
-            echo "创建新的密钥：$AKASH_KEY_NAME"
-            if ! echo "$KEYRING_PASSPHRASE" | akash keys add "$AKASH_KEY_NAME" --keyring-backend file; then
-              echo "错误：密码验证失败或密钥创建失败，请检查 KEYRING_PASSPHRASE 是否正确。"
+      # 使用助记词恢复钱包
+      - name: Import key from mnemonic
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+        run: |
+          set -eux
+          # akash keys add --recover 时，会先让你输入两遍 passphrase，再输入助记词
+
+          # 我们通过 echo 的方式传三次输入：
+          #  1. 第一次 passphrase
+          #  2. 第二次 passphrase
+          #  3. 助记词 (24个单词)
+          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$AKASH_MNEMONIC") \
+            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
+
+          echo "Key 恢复完毕！"
+
+      # 使用 Expect 脚本解锁 key 并显示地址
+      - name: Execute Expect script
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+        run: |
+          set -eux
+          echo '#!/usr/bin/expect -f
+          set timeout 20
+          log_user 1
+
+          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 } {
+              puts "错误：环境变量 AKASH_KEY_NAME 或 KEYRING_PASSPHRASE 未设置。"
               exit 1
-            fi
-          fi
+          }
 
-          echo "导出密钥内容为 JSON 文件"
-          if ! echo "$KEYRING_PASSPHRASE" | akash keys export "$AKASH_KEY_NAME" --keyring-backend file --output json > my-new-key.json; then
-            echo "错误：密钥导出失败"
+          spawn akash keys show "$::env(AKASH_KEY_NAME)" -a --keyring-backend file
+          expect {
+              -re {Enter keyring passphrase.*} {
+                  send "$::env(KEYRING_PASSPHRASE)\r"
+              }
+              eof {
+                  puts "错误：spawn 命令未成功执行。(可能找不到 akash？)"
+                  exit 1
+              }
+              timeout {
+                  puts "错误：spawn 命令超时。"
+                  exit 1
+              }
+          }
+
+          expect {
+              -re {^(akash1[a-z0-9]+)$} {
+                  set address $expect_out(1,string)
+                  send_user "$address\n"
+              }
+              timeout {
+                  puts "错误：未能捕获钱包地址。"
+                  exit 1
+              }
+          }
+
+          expect eof
+          ' > get_address.exp
+
+          chmod +x get_address.exp
+          ADDR=$(./get_address.exp)
+
+          if [ -z "$ADDR" ]; then
+            echo "错误：无法获取钱包地址。"
             exit 1
           fi
+          echo "您的钱包地址为: $ADDR"
 
-          KEY_FILE_CONTENT=$(cat my-new-key.json | base64)
-          echo "::set-output name=key_file_content::$KEY_FILE_CONTENT"
+      # (可选) 查询余额，或进行后续部署操作
+      # - name: Query balance
+      #   env:
+      #     AKASH_CHAIN_ID: sandbox-01
+      #     AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+      #     AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+      #     KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+      #   run: |
+      #     set -eux
+      #     ADDR=$( (echo "$KEYRING_PASSPHRASE") | akash keys show "$AKASH_KEY_NAME" -a --keyring-backend file )
+      #     echo "余额如下："
+      #     akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+
