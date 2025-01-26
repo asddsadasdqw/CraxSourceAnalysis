@@ -1,14 +1,17 @@
-name: Deploy to Akash Testnet
+name: Deploy with New Key
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码
+      # 第1步：检出代码（若需要）
       - name: Check out code
         uses: actions/checkout@v3
 
@@ -16,99 +19,99 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y expect yamllint
+          sudo apt-get install -y expect unzip
 
-      # 第3步：安装 Akash CLI
+      # 第3步：安装 Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+          echo "Downloading from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
-          mkdir -p akash-cli
+          if [ ! -s akash.zip ]; then
+              echo "下载失败或文件为空。"
+              exit 1
+          fi
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-          echo "Akash CLI installed successfully:"
+
+          echo "安装完成，版本信息："
           akash version
 
-      # 第4步：验证环境变量
-      - name: Validate environment variables
+      # 第4步：创建 Key（口令≥8字符，防止报“密码必须≥8字符”）
+      - name: Create Key
         env:
-          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
-          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
-          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
         run: |
           set -eux
-          if [ -z "$AKASH_KEY_NAME" ]; then
-            echo "错误：AKASH_KEY_NAME 未设置"
-            exit 1
-          fi
-          if [ -z "$KEYRING_PASSPHRASE" ]; then
-            echo "错误：KEYRING_PASSPHRASE 未设置"
-            exit 1
-          fi
-          if [ -z "$AKASH_MNEMONIC" ]; then
-            echo "错误：AKASH_MNEMONIC 未设置"
-            exit 1
-          fi
-          echo "环境变量已正确设置"
+          # akash keys add 要输入两遍口令
+          (echo "$KEY_PASSPHRASE"; echo "$KEY_PASSPHRASE") | akash keys add "$KEY_NAME" --keyring-backend file
 
-      # 第5步：通过 Expect 脚本导入密钥
-      - name: Import key using Expect script
+          # 再次输入口令，查看地址
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "已创建 Key：$KEY_NAME，地址：$ADDR"
+
+      # 第5步（可选）：查询余额（示例）
+      - name: Query Balance
         env:
-          AKASH_KEY_NAME: "${{ secrets.AKASH_KEY_NAME }}"
-          KEYRING_PASSPHRASE: "${{ secrets.KEYRING_PASSPHRASE }}"
-          AKASH_MNEMONIC: "${{ secrets.AKASH_MNEMONIC }}"
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
         run: |
           set -eux
-          echo "清理助记词..."
-          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "查询 $ADDR 在 $AKASH_CHAIN_ID 上的余额..."
+          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
 
-          # 验证助记词单词数量
-          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
-          if [ "$WORD_COUNT" -ne 24 ]; then
-            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
-            exit 1
-          fi
+      # 第6步：使用 Expect 脚本来 export Key，解决“too many failed passphrase attempts”问题
+      - name: Export Key via Expect
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+        run: |
+          set -eux
 
-          echo "写入 Expect 脚本用于恢复密钥..."
-          cat <<EOF > import_key.exp
-          #!/usr/bin/expect -f
-          log_user 1
-          set timeout 60
+          # 生成一个 Expect 脚本来输入 passphrase
+          cat <<'EOF' > export_key.exp
+#!/usr/bin/expect -f
+set timeout 20
+log_user 1
 
-          if { [info exists ::env(AKASH_KEY_NAME)] == 0 || [info exists ::env(KEYRING_PASSPHRASE)] == 0 || [info exists ::env(AKASH_MNEMONIC)] == 0 } {
-              puts "错误：环境变量未正确设置。"
-              exit 1
-          }
+# 调用 akash keys export，只给 key 名当参数
+spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
 
-          spawn akash keys add "$::env(AKASH_KEY_NAME)" --recover --keyring-backend file
-          expect "Enter keyring passphrase:"
-          send "$::env(KEYRING_PASSPHRASE)\r"
-          expect "Re-enter keyring passphrase:"
-          send "$::env(KEYRING_PASSPHRASE)\r"
-          expect "Enter your bip39 mnemonic:"
-          send "$::env(AKASH_MNEMONIC)\r"
-          expect {
-              eof {
-                  puts "密钥恢复成功！"
-                  exit 0
-              }
-              "Error: invalid mnemonic" {
-                  puts "错误：助记词无效，请检查 AKASH_MNEMONIC 的值。"
-                  exit 1
-              }
-              timeout {
-                  puts "错误：超时，请检查输入是否正确。"
-                  exit 1
-              }
-          }
+expect {
+    -re {Enter keyring passphrase.*} {
+        send "$::env(KEY_PASSPHRASE)\r"
+        exp_continue
+    }
+    eof {
+        # 如果没有遇到 passphrase 提示就直接EOF，也会进这里
+        # 可能说明命令结束了或出错了
+    }
+    timeout {
+        puts "错误：导出命令超时。"
+        exit 1
+    }
+}
+expect eof
 EOF
 
-          chmod +x import_key.exp
-          ./import_key.exp
+          chmod +x export_key.exp
 
-      # 第6步：部署或查询操作
-      - name: (Optional) Perform deployment or other actions
-        run: |
-          echo "部署或其他操作可在此处添加..."
+          # 将脚本的标准输出重定向到 key.json 文件
+          ./export_key.exp > key.json
+
+          # 再base64编码
+          base64 key.json > key.json.b64
+
+          echo "key.json.b64 已生成，可提供给“贾维斯”，用同口令“qq112233”导入。"
+
+          # 若要让后续步骤或别的 job 使用，可upload到Artifacts:
+          #   - uses: actions/upload-artifact@v3
+          #     with:
+          #       name: akash-key-export
+          #       path: key.json.b64
