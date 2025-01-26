@@ -106,7 +106,7 @@ EOF
 
           echo "key.json.b64 generated. It can be imported with the same passphrase 'qq112233'."
 
-      # Upload the key.json.b64 to GitHub Artifacts
+      # Step 7: Upload the base64-encoded key.json as an artifact
       - name: Upload Key Artifact
         uses: actions/upload-artifact@v3
         with:
