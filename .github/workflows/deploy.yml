@@ -1,18 +1,29 @@
-name: Create Akash Key
+name: Deploy to Akash Testnet
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
-  create-akash-key:
-    runs-on: ubuntu-latest
+  build-and-deploy:
+    runs-on: ubuntu-22.04
 
     steps:
-      # 安装 Akash CLI
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect yamllint
+
       - name: Install Akash CLI
         run: |
           set -eux
           DOWNLOAD_URL="https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip"
+          echo "Downloading Akash CLI from $DOWNLOAD_URL"
           curl -sSL "$DOWNLOAD_URL" -o akash.zip
           mkdir -p akash-cli
           unzip akash.zip -d akash-cli
@@ -20,32 +31,30 @@ jobs:
           sudo chmod +x /usr/local/bin/akash
           akash version
 
-      # 创建新密钥并记录信息
-      - name: Create new Akash key
+      - name: Validate environment variables
         env:
-          NEW_KEY_NAME: my-new-key
-          KEYRING_PASSPHRASE: "your-secure-password"  # 可以在这里设置安全密码
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
           set -eux
-          echo "创建新的密钥: $NEW_KEY_NAME"
+          echo "AKASH_KEY_NAME: $AKASH_KEY_NAME"
+          echo "KEYRING_PASSPHRASE: ${#KEYRING_PASSPHRASE} characters (隐藏实际值)"
+          echo "AKASH_MNEMONIC: ${#AKASH_MNEMONIC} characters (隐藏实际值)"
 
-          # 动态创建密钥
-          echo "$KEYRING_PASSPHRASE" | akash keys add "$NEW_KEY_NAME" --keyring-backend file > new-key-info.txt
-
-          echo "密钥已创建，保存密钥信息到文件 new-key-info.txt"
-          cat new-key-info.txt
-
-          # 提取地址
-          KEY_ADDRESS=$(grep -oP '(?<=address:\s).*' new-key-info.txt)
-          echo "地址: $KEY_ADDRESS"
-
-          # 提取助记词
-          MNEMONIC=$(grep -oP '(?<=mnemonic:\s).*' new-key-info.txt)
-          echo "助记词: $MNEMONIC"
-
-      # 保存密钥信息（供后续操作使用）
-      - name: Output key information
+      - name: Import key from mnemonic
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
         run: |
-          echo "将密钥地址和助记词输出到控制台供手动记录："
-          echo "::set-output name=key_address::$KEY_ADDRESS"
-          echo "::set-output name=mnemonic::$MNEMONIC"
+          set -eux
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
+          WORD_COUNT=$(echo "$CLEANED_MNEMONIC" | wc -w)
+          if [ "$WORD_COUNT" -ne 24 ]; then
+            echo "错误：助记词的单词数量不正确 (当前数量: $WORD_COUNT)"
+            exit 1
+          fi
+          (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
+            | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
+          echo "密钥导入成功！"
