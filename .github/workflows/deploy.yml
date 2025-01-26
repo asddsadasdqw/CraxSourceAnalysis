@@ -45,16 +45,16 @@ jobs:
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           sudo apt-get update && sudo apt-get install -y expect
-          cat <<EOF > recovery-script.exp
-spawn akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file
-expect "Enter your bip39 mnemonic:"
-send "$AKASH_MNEMONIC\r"
-expect "Enter keyring passphrase:"
-send "$KEYRING_PASSPHRASE\r"
-expect "Re-enter keyring passphrase:"
-send "$KEYRING_PASSPHRASE\r"
-expect eof
-EOF
+          echo "
+          spawn akash keys add \"$AKASH_KEY_NAME\" --recover --keyring-backend file
+          expect \"Enter your bip39 mnemonic:\"
+          send \"$AKASH_MNEMONIC\\r\"
+          expect \"Enter keyring passphrase:\"
+          send \"$KEYRING_PASSPHRASE\\r\"
+          expect \"Re-enter keyring passphrase:\"
+          send \"$KEYRING_PASSPHRASE\\r\"
+          expect eof
+          " > recovery-script.exp
           expect recovery-script.exp
 
       # Step 7: Verify Wallet Recovery
@@ -62,7 +62,7 @@ EOF
         run: |
           akash keys list
 
-      # Step 8: Deploy to Akash
+      # Step 8: Deploy to Akash Network
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
