@@ -29,7 +29,7 @@ jobs:
           sudo chmod +x /usr/local/bin/akash
           akash version
 
-      - name: Import key from mnemonic
+      - name: Validate mnemonic
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
@@ -47,12 +47,16 @@ jobs:
             exit 1
           fi
 
-          # 调试输入值
-          echo "密钥名称: $AKASH_KEY_NAME"
-          echo "清理后的助记词: $CLEANED_MNEMONIC"
-          echo "密码长度: ${#KEYRING_PASSPHRASE}"
+          echo "助记词已验证，准备恢复密钥..."
 
-          # 恢复密钥
+      - name: Import key from mnemonic
+        env:
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+          KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
+          AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+        run: |
+          set -eux
+          CLEANED_MNEMONIC=$(echo "$AKASH_MNEMONIC" | tr -s ' ' | tr -d '\n')
           (echo "$KEYRING_PASSPHRASE"; echo "$KEYRING_PASSPHRASE"; echo "$CLEANED_MNEMONIC") \
             | akash keys add "$AKASH_KEY_NAME" --recover --keyring-backend file || {
               echo "错误：密钥恢复失败，请检查助记词和密码是否正确。"
