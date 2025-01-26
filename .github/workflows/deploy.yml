@@ -14,7 +14,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # Step 2: (可选) 调试文件路径
+      # Step 2: 调试文件路径（可选）
       - name: Debug File Path
         run: |
           echo "Current working directory: $(pwd)"
@@ -24,7 +24,6 @@ jobs:
       # Step 3: 安装 Akash CLI
       - name: Install Akash CLI
         run: |
-          # 下载并解压 akash CLI
           curl -sSL https://github.com/ovrclk/akash/releases/download/v1.0.0-rc10/akash_1.0.0-rc10_linux_amd64.zip -o akash.zip
           if [ ! -s akash.zip ]; then
               echo "Download failed or file is empty."
@@ -34,8 +33,6 @@ jobs:
           unzip akash.zip -d akash-cli
           sudo mv akash-cli/akash /usr/local/bin/akash
           sudo chmod +x /usr/local/bin/akash
-
-          # 验证安装是否成功
           akash version
 
       # Step 4: 恢复 Akash 钱包
@@ -47,13 +44,11 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y expect
           
-          # 验证环境变量
           if [ -z "$AKASH_MNEMONIC" ] || [ -z "$AKASH_KEY_NAME" ] || [ -z "$KEYRING_PASSPHRASE" ]; then
             echo "Error: One or more required environment variables (AKASH_MNEMONIC, AKASH_KEY_NAME, KEYRING_PASSPHRASE) are missing."
             exit 1
           fi
 
-          # 用 expect 自动输入助记词 + keyring 密码
           echo "
           spawn akash keys add \"$AKASH_KEY_NAME\" --recover --keyring-backend file
           expect \"Enter your bip39 mnemonic:\"
@@ -64,7 +59,6 @@ jobs:
           send \"$KEYRING_PASSPHRASE\\r\"
           expect eof
           " > recovery-script.exp
-
           expect recovery-script.exp
           rm -f recovery-script.exp
 
@@ -74,12 +68,13 @@ jobs:
           echo "Listing all keys in Akash CLI:"
           akash keys list
 
-      # Step 6: 部署到 Akash（使用 HTTPS RPC）
+      # Step 6: 部署到 Akash（主网 chain-id）
       - name: Deploy to Akash
         env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: akashnet-2
-          AKASH_NODE_URL: https://akash-rpc.polkachu.com
+          # 改成带端口的 HTTPS
+          AKASH_NODE_URL: https://akash-rpc.polkachu.com:443
           KEYRING_PASSPHRASE: ${{ secrets.KEYRING_PASSPHRASE }}
         run: |
           # 1) 检查必要环境变量
@@ -88,17 +83,16 @@ jobs:
             exit 1
           fi
 
-          # 2) 检查部署文件
           if [ ! -f deploy.yml ]; then
-            echo "Error: deploy.yml not found!"
-            exit 1
+              echo "Error: deploy.yml not found!"
+              exit 1
           fi
 
-          # 3) 可选：测试一下节点是否返回 JSON
+          # 2) 测试 RPC 是否可返回 JSON
           echo "Testing connectivity to $AKASH_NODE_URL..."
-          curl --fail --max-time 10 "$AKASH_NODE_URL/status" || true
+          curl --fail --max-time 10 "$AKASH_NODE_URL/status"
 
-          # 4) 发起部署交易
+          # 3) 用 Akash CLI 提交部署交易
           echo "$KEYRING_PASSPHRASE" | akash tx deployment create deploy.yml \
             --from "$AKASH_KEY_NAME" \
             --chain-id "$AKASH_CHAIN_ID" \
