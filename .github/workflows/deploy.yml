@@ -1,4 +1,4 @@
-name: Minimal Working Workflow
+name: Akash Workflow
 
 on:
   push:
@@ -11,11 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 第1步：检出代码（可选，只有在需要访问仓库代码时保留）
+      # Step 1: Check out the code
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 第2步：安装 Akash CLI（v1.0.0-rc10）
+      # Step 2: Install Akash CLI (v1.0.0-rc10)
       - name: Install Akash CLI
         run: |
           sudo apt-get update
@@ -29,7 +29,7 @@ jobs:
           echo "Akash CLI installed successfully:"
           akash version
 
-      # 第3步：注册一个 Akash 钱包
+      # Step 3: Register a new Akash Wallet
       - name: Register Akash Wallet
         env:
           KEY_NAME: newkey
@@ -41,3 +41,57 @@ jobs:
           echo "Wallet registered successfully!"
           echo "Wallet Name: $KEY_NAME"
           echo "Wallet Address: $ADDR"
+
+      # Step 4: Query Wallet Balance
+      - name: Query Wallet Balance
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "Querying balance for $ADDR on chain $AKASH_CHAIN_ID..."
+          akash query bank balances "$ADDR" --node "$AKASH_NODE_URL"
+
+      # Step 5: Export Wallet Key (Encrypted Storage)
+      - name: Export Wallet Key
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+        run: |
+          echo "Exporting wallet key to encrypted file..."
+          cat <<EOF > export_key.exp
+#!/usr/bin/expect -f
+set timeout 20
+spawn akash keys export "$::env(KEY_NAME)" --keyring-backend file
+expect "Enter keyring passphrase:" { send "$::env(KEY_PASSPHRASE)\r" }
+expect eof
+EOF
+          chmod +x export_key.exp
+          ./export_key.exp > key.json
+          base64 key.json > key.json.b64
+          echo "Key exported and encoded as key.json.b64"
+
+      # Step 6: Upload Key Artifact
+      - name: Upload Wallet Key Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: akash-wallet-key
+          path: key.json.b64
+
+      # Step 7: Deploy Akash Application
+      - name: Deploy Akash Application
+        env:
+          KEY_NAME: newkey
+          KEY_PASSPHRASE: "qq112233"
+          AKASH_CHAIN_ID: sandbox-01
+          AKASH_NODE_URL: http://rpc.sandbox-01.aksh.pw:26657
+        run: |
+          echo "Deploying Akash application..."
+          ADDR=$( (echo "$KEY_PASSPHRASE") | akash keys show "$KEY_NAME" -a --keyring-backend file )
+          echo "Using wallet address: $ADDR"
+          # 示例部署（替换为实际的 SDL 文件路径和部署命令）
+          SDL_FILE="deployment.yaml"
+          akash tx deployment create "$SDL_FILE" --from "$KEY_NAME" --keyring-backend file --chain-id "$AKASH_CHAIN_ID" --node "$AKASH_NODE_URL" --yes
+          echo "Application deployment submitted!"
