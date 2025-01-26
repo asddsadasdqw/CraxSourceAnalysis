@@ -37,14 +37,20 @@ jobs:
           sudo mv akash-cli/akash /usr/local/bin/akash
 
       # Step 6: 恢复 Akash 钱包
-      - name: Deploy to Akash
+      - name: Recover Akash Wallet
         env:
           AKASH_MNEMONIC: ${{ secrets.AKASH_MNEMONIC }}
+          AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
+        run: |
+          echo "$AKASH_MNEMONIC" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
+
+      # Step 7: 部署到 Akash
+      - name: Deploy to Akash
+        env:
           AKASH_KEY_NAME: ${{ secrets.AKASH_KEY_NAME }}
           AKASH_CHAIN_ID: ${{ secrets.AKASH_CHAIN_ID }}
           AKASH_NODE_URL: ${{ secrets.AKASH_NODE_URL }}
         run: |
-          yes "" | akash keys add $AKASH_KEY_NAME --recover --keyring-backend file
           akash tx deployment create akash/deploy.yml \
             --from $AKASH_KEY_NAME \
             --chain-id $AKASH_CHAIN_ID \
