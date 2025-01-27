@@ -56,42 +56,42 @@ jobs:
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
-          version: "2.0"
+version: "2.0"
 
-          services:
-            web:
-              image: "${{ secrets.DOCKER_USERNAME }}/my-app:latest"
-              expose:
-                - port: 80
-                  as: 80
-                  to:
-                    - global: true
+services:
+  web:
+    image: "${{ secrets.DOCKER_USERNAME }}/my-app:latest"
+    expose:
+      - port: 80
+        as: 80
+        to:
+          - global: true
 
-          profiles:
-            compute:
-              basic:
-                resources:
-                  cpu:
-                    units: 0.5
-                  memory:
-                    size: 512Mi
-                  storage:
-                    size: 1Gi
-            placement:
-              basic:
-                attributes: {}
-                signedBy:
-                  anyOf: []
-                pricing:
-                  web:
-                    denom: uakt
-                    amount: 1000
+profiles:
+  compute:
+    basic:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 512Mi
+        storage:
+          size: 1Gi
+  placement:
+    basic:
+      attributes: {}
+      signedBy:
+        anyOf: []
+      pricing:
+        web:
+          denom: uakt
+          amount: 1000
 
-          deployment:
-            web:
-              profile: basic
-              count: 1
-          EOF
+deployment:
+  web:
+    profile: basic
+    count: 1
+EOF
 
       # 7. 创建部署
       - name: Create Deployment
