@@ -37,7 +37,7 @@ jobs:
           echo "keyring-backend = 'file'" >> ~/.akash/config.toml
           echo "Akash CLI configured to use remote node."
 
-      # 4. 创建新的 Akash 钱包（示例口令 qq112233）
+      # 4. 创建新的 Akash 钱包
       - name: Create New Akash Wallet
         run: |
           echo "Creating a new Akash wallet: ${{ secrets.AKASH_KEY_NAME }}"
@@ -52,7 +52,7 @@ jobs:
           akash keys list --keyring-backend file
           echo "Wallet Address: $AKASH_ADDRESS"
 
-      # 6. 生成 SDL 文件 (deployment.yaml)
+      # 6. 生成 SDL 文件
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
