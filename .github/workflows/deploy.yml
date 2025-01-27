@@ -52,7 +52,7 @@ jobs:
           akash keys list --keyring-backend file
           echo "Wallet Address: $AKASH_ADDRESS"
 
-      # 6. 生成 SDL 文件
+      # 6. 生成 SDL 文件 (deployment.yaml)
       - name: Generate SDL File
         run: |
           cat <<EOF > deployment.yaml
